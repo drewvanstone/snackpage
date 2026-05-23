@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -102,5 +103,90 @@ func TestGetBookmarks_Empty(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `"bookmarks":[]`) {
 		t.Errorf("body = %s", body)
+	}
+}
+
+func postJSON(t *testing.T, url, body string) (*http.Response, []byte) {
+	t.Helper()
+	resp, err := http.Post(url, "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	return resp, data
+}
+
+func TestPostBookmark_Creates(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp, body := postJSON(t, ts.URL+"/api/bookmarks", `{
+		"title":"Team Dashboard",
+		"url":"https://example.com",
+		"tags":["work"],
+		"aliases":["team board"]
+	}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d; body = %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"id":"`) {
+		t.Errorf("response missing id: %s", body)
+	}
+}
+
+func TestPostBookmark_RejectsBadURL(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+	resp, _ := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"x","url":"::::"}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d; want 400", resp.StatusCode)
+	}
+}
+
+func TestPutBookmark_Updates(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+	resp, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"a","url":"https://example.com"}`)
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(body, &created)
+
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/bookmarks/"+created.ID,
+		strings.NewReader(`{"title":"b","url":"https://example.com/v2"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d", resp.StatusCode)
+	}
+}
+
+func TestDeleteBookmark(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+	_, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"a","url":"https://example.com"}`)
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(body, &created)
+
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/"+created.ID, nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("status = %d; want 204", resp.StatusCode)
+	}
+}
+
+func TestDeleteBookmark_NotFound(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/00000000", nil)
+	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d; want 404", resp.StatusCode)
 	}
 }
