@@ -159,7 +159,11 @@ decay = 1.0   if days_since <= 1
 score = max(visit_count, 1) * decay
 ```
 
-Floor on `visit_count` (clamping to 1) ensures brand-new and never-clicked bookmarks don't disappear forever at score zero. Lives in `internal/frecency` as a pure function with table-driven tests so the curve is easy to retune later. Ties are broken by alphabetical title.
+Floor on `visit_count` (clamping to 1) ensures brand-new and never-clicked bookmarks don't disappear forever at score zero. Lives in `internal/frecency` as a pure function with table-driven tests so the curve is easy to retune later. Ties (identical frecency scores) are broken by alphabetical title.
+
+This frecency score has two uses, which differ slightly:
+1. **Empty input — primary sort.** Bookmarks are listed in descending frecency, alphabetical tiebreak.
+2. **Non-empty input — search tiebreak only.** The fzf match score dominates; frecency adds a small (`0.001×`) nudge so equal-quality fuzzy matches favor the more-likely-next-click. See §6 for the exact weighting.
 
 ### ID generation
 
@@ -250,14 +254,16 @@ Bookmarks with `final_score == 0` (no field matches) are hidden. Empty input byp
 
 | Keys | Context | Action |
 |---|---|---|
-| `↑` / `↓` / `j` / `k` / `Ctrl+N` / `Ctrl+P` | picker | Move selection |
+| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | picker (any focus) | Move selection |
+| `j` / `k` | picker (input empty or unfocused) | Move selection (vim convenience) |
+| `j` / `k` | picker (input has text) | Type the character (does not navigate) |
 | `⏎` | picker | Open selected via `/go/:id` (replaces tab) |
 | `⌘⏎` / `Ctrl+⏎` | picker | Open in new tab via `window.open("/go/:id", "_blank")` |
 | `⌘N` | picker | Open Add modal |
 | `⌘E` | picker | Open Edit modal (prefilled from selected row) |
-| `⌘D` | picker | Delete confirm — row reddens, second `⌘D` within 2s deletes |
-| `/` | picker | Focus search input if unfocused |
-| `⎋` | picker | Clear input if any, else nothing |
+| `⌘D` | picker | Delete confirm — row reddens, second `⌘D` within 2s deletes; any other key / selection change cancels |
+| `/` | picker | Focus search input (no-op if already focused) |
+| `⎋` | picker | Clear input if non-empty, else blur input, else no-op |
 | `Tab` / `Shift+Tab` | modal | Cycle fields: URL → Title → Tags → Aliases → Cancel → Save → URL |
 | `⏎` | modal | Submit |
 | `⌘⏎` | modal | Submit (muscle-memory parity with picker) |
@@ -390,6 +396,7 @@ A tiny `playwright` or `puppeteer` script (deferred to v1.1 if it adds friction)
 - `snackpage import chrome [--profile NAME]` — read Chrome bookmarks JSON, interactive preview/select
 - `pinned` boolean field; pinned rows stick above the frecency list
 - Optional favicons cached to `$XDG_CACHE_HOME/snackpage/favicons/`, served via `/static/favicon/:host`
+- **Catppuccin Latte (light variant)** auto-switching based on `$XDG_CONFIG_HOME/catppuccin-theme/current-variant` (matches the user's existing theme-switching setup)
 
 ### v4 — first-party extension
 
