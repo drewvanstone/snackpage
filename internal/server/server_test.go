@@ -86,3 +86,21 @@ func TestUnknownRoute(t *testing.T) {
 		t.Errorf("status = %d; want 404", resp.StatusCode)
 	}
 }
+
+func TestGetBookmarks_Empty(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/bookmarks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d; want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"bookmarks":[]`) {
+		t.Errorf("body = %s", body)
+	}
+}

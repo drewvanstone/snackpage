@@ -32,6 +32,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(s.assets))))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /api/bookmarks", s.handleListBookmarks)
 	return recoverPanics(s.logger, logRequests(s.logger, mux))
 }
 
