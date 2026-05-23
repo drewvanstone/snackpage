@@ -1,0 +1,21 @@
+# Brainstorming companion artefacts
+.superpowers/
+
+# Built binary
+/snackpage
+
+# Static export output (v2)
+/dist/
+
+# Go build / test
+*.test
+*.out
+coverage.out
+coverage.html
+
+# macOS
+.DS_Store
+
+# Editor noise
+*.swp
+*~

@@ -1,0 +1,410 @@
+# snackpage — design
+
+**Status:** draft, brainstormed 2026-05-23
+**Owner:** Drew Flower (`dflower@nvidia.com`)
+**Tagline:** A keyboard-driven, snacks.nvim-inspired bookmark picker that lives at your browser's new-tab page.
+
+---
+
+## 1. Overview
+
+`snackpage` is a small Go daemon that serves a single HTML page from `localhost`. The page is a fuzzy-find bookmark picker modelled on `snacks.nvim`'s picker UX: type, narrow, press Enter, go. It is intended to be the default new-tab page in the user's browser, so the loop "Cmd+T → type a few characters → Enter" reliably opens any bookmark in under two seconds without touching the mouse.
+
+Bookmarks live in a hand-editable JSON file. A sidecar JSON file holds click stats so the picker can sort by **frecency** (recency × frequency). All HTTP, all rendering, and all storage happen locally — no network calls, no cloud, no auth.
+
+The binary doubles as a future static-site generator (`snackpage build`, deferred to v2) so the page can also be exported as a standalone `index.html`.
+
+## 2. Goals & non-goals
+
+### Goals (v1)
+
+- **Sub-two-second navigation** from `Cmd+T` to any known URL via fuzzy match on title, URL, tags, and aliases.
+- **Frecency-ranked default order** so the empty-input view is useful.
+- **In-page CRUD** for bookmarks — add (⌘N), edit (⌘E), delete (⌘D) — no CLI, no hand-editing required.
+- **JSON storage** at a standard XDG path, atomic writes, diff-friendly for git backup.
+- **Standard Go and Unix conventions** — `cmd/`/`internal/` layout, XDG paths, stdlib `net/http`, structured logging via `log/slog`.
+- **Catppuccin Mocha** styling out of the box, matching the rest of the user's environment.
+
+### Non-goals (v1 — or possibly ever)
+
+- Multi-user / multi-tenant support
+- Hosted SaaS or remote sync
+- Mobile / responsive layout for phones (keyboard-driven tool)
+- E2E sync (Syncthing / git / iCloud on the JSON file is fine if desired)
+- Auth / TLS (loopback only)
+- Browser-extension hijacking of `Cmd+T` (use an off-the-shelf "New Tab Redirect" extension; first-party extension is a v4 idea)
+
+## 3. Architecture
+
+### Process model
+
+A single Go binary with subcommands:
+
+```
+snackpage serve [--addr 127.0.0.1:8765] [--data-dir PATH]   # v1, primary
+snackpage build [--out PATH]                                 # v2
+snackpage version                                            # v1
+```
+
+`serve` is a long-running foreground process in v1. v2 wraps it in a macOS LaunchAgent for autostart (Linux gets a systemd unit; both are deferred). The server listens on `127.0.0.1` only — never `0.0.0.0`. No TLS, no auth.
+
+All web assets (HTML, JS, CSS, the vendored `fzf-for-js` library) are embedded into the binary at compile time via `go:embed`. The compiled binary is fully self-contained: copy it anywhere, run it, the page works.
+
+### High-level data flow
+
+```
+            ┌─────────────────────────┐
+            │   Browser  (Chrome/…)   │
+            │  new tab → localhost    │
+            └────────────┬────────────┘
+                         │ HTTP
+            ┌────────────▼────────────┐
+            │   snackpage serve       │
+            │  (Go, stdlib net/http)  │
+            │  embedded HTML/JS/CSS   │
+            └────────────┬────────────┘
+                         │ atomic read/write
+            ┌────────────▼─────────────────────────────┐
+            │  $XDG_DATA_HOME/snackpage/               │
+            │    bookmarks.json   (canonical, git OK)  │
+            │    state.json       (churn, do not git)  │
+            └──────────────────────────────────────────┘
+```
+
+### Frontend rendering model
+
+Server emits a thin HTML shell plus an embedded `app.js`. On load:
+
+1. `app.js` fetches `/api/bookmarks` once — list held in memory.
+2. Page renders the full list, frecency-sorted, with the search input focused and cursor blinking.
+3. Every keystroke re-filters the in-memory list via `fzf-for-js` (an actual port of fzf's v2 algorithm, ~30 KB). Scores combine weighted field hits with frecency as a tiebreaker.
+4. Mutations (`POST /api/bookmarks`, etc.) trigger a re-fetch of `/api/bookmarks` on success.
+
+No SPA framework. Plain vanilla JS plus one templating-free HTML file. The cognitive surface is small enough that I can hold the entire frontend in my head while reading it.
+
+## 4. Data model
+
+### Storage location
+
+```
+$XDG_DATA_HOME/snackpage/          # defaults to ~/.local/share/snackpage/
+├── bookmarks.json
+└── state.json
+```
+
+`--data-dir` overrides. The directory is created with `0700` on first run.
+
+### `bookmarks.json`
+
+Hand-editable, ordered by `created_at`, version-headered for future migration:
+
+```json
+{
+  "version": 1,
+  "bookmarks": [
+    {
+      "id": "b7k3m2qa",
+      "title": "Team Dashboard",
+      "url": "https://jirasw.nvidia.com/secure/RapidBoard.jspa?rapidView=12345",
+      "tags": ["work", "jira"],
+      "aliases": ["team board", "sprint board", "nkx board"],
+      "created_at": "2026-05-23T14:30:00Z"
+    }
+  ]
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | 8-char Crockford base32, server-generated, stable across edits. Used in `/go/:id` URLs. |
+| `title` | string | yes | Free text, user-set. No auto-fetch from URL in v1. |
+| `url` | string | yes | Validated via `net/url.Parse` on write; must have scheme + host. |
+| `tags` | string[] | no | Lowercased, trimmed, deduplicated on write. Empty array preserved. |
+| `aliases` | string[] | no | Preserved as-given (case + punctuation). Searched but not displayed. |
+| `created_at` | RFC 3339 string | yes | Set server-side on creation. |
+
+### `state.json`
+
+Map keyed by id, written on every `GET /go/:id` and on every `DELETE`:
+
+```json
+{
+  "version": 1,
+  "stats": {
+    "b7k3m2qa": {
+      "visit_count": 89,
+      "last_visit_at": "2026-05-23T17:12:33Z"
+    }
+  }
+}
+```
+
+State entries for unknown ids are pruned **lazily** at the next full save (no big-bang cleanup pass).
+
+### Atomic writes
+
+For both files: write to `<file>.tmp` → `fsync` → `rename` to final path. This protects against partial writes if the process is killed mid-write. The OS rename is atomic on the same filesystem.
+
+In-process concurrency is mediated by one `sync.RWMutex` per file (`bookmarksMu`, `stateMu`). Reads can fan out, writes are serialized.
+
+### Frecency formula
+
+```text
+days_since = floor((now - last_visit_at) / 24h)         # +∞ if never visited
+decay = 1.0   if days_since <= 1
+      = 0.6   if days_since <= 7
+      = 0.3   if days_since <= 30
+      = 0.1   otherwise
+
+score = max(visit_count, 1) * decay
+```
+
+Floor on `visit_count` (clamping to 1) ensures brand-new and never-clicked bookmarks don't disappear forever at score zero. Lives in `internal/frecency` as a pure function with table-driven tests so the curve is easy to retune later. Ties are broken by alphabetical title.
+
+### ID generation
+
+8 chars from the Crockford base32 alphabet (`0123456789ABCDEFGHJKMNPQRSTVWXYZ`, no `I L O U`). Generated via `crypto/rand`. Collision probability with 8 chars is negligible at the bookmark counts a single user will reach; we'll detect-and-retry on the millionth-of-a-percent chance.
+
+## 5. HTTP API
+
+All routes live under one `http.ServeMux`. JSON request/response throughout, except for `/` (HTML), `/static/*` (assets), and `/go/:id` (302).
+
+| Method | Path | Purpose | Response |
+|---|---|---|---|
+| GET | `/` | Serve embedded `index.html` | HTML |
+| GET | `/static/*` | Embedded JS/CSS/fonts | static assets |
+| GET | `/api/bookmarks` | All bookmarks, with stats merged in | `200 {"bookmarks":[{...}]}` |
+| POST | `/api/bookmarks` | Create — body `{title,url,tags,aliases}` | `201 {bookmark}` |
+| PUT | `/api/bookmarks/{id}` | Update — body same as POST | `200 {bookmark}` |
+| DELETE | `/api/bookmarks/{id}` | Delete + prune stats | `204` |
+| GET | `/go/{id}` | 302 redirect; bumps stats | `302 Location: <url>` |
+| GET | `/healthz` | Liveness check (for future LaunchAgent) | `200 "ok"` |
+
+Everything else returns 404. JSON errors use `{"error":"..."}` with proper status codes. **CORS is not enabled** — daemon binds to loopback only and same-origin from the served HTML is the only legitimate caller.
+
+### Validation rules
+
+- `title` and `url` required and non-empty after trim.
+- `url` must parse via `net/url.Parse` and have non-empty `Scheme` and `Host`.
+- `tags` and `aliases`: optional, trimmed of whitespace, empty strings filtered out.
+- `tags` are lowercased and deduplicated; `aliases` preserve case.
+
+Invalid input → `400 {"error":"<reason>"}`.
+
+### Redirect-tracking semantics
+
+`GET /go/:id`:
+
+1. Look up bookmark; if not found, `404`.
+2. Atomically increment `state.stats[id].visit_count` by 1.
+3. Set `state.stats[id].last_visit_at = time.Now().UTC()`.
+4. Persist `state.json` (atomic write).
+5. Respond `302 Location: <bookmark.url>`.
+
+Step 4 happens *before* the redirect response. If the disk write fails we still redirect (best-effort logging) — never block the navigation on a stats write.
+
+## 6. UI behavior & keymap
+
+### Visual model
+
+Layout is "Option B" from brainstorming — two-line rows, title prominent, URL + tags muted below, last-visit right-aligned. Catppuccin Mocha palette. Monospace font (JetBrains Mono via system fallback chain).
+
+```
+snackpage
+❯ kub|
+  ▌  NVIDIA JIRA                                      3h ago
+     jirasw.nvidia.com  ·  work, nv                  89 visits
+
+     Kubernetes Docs                                  2d ago
+     kubernetes.io  ·  k8s, docs                     47 visits
+
+     ...
+```
+
+Selected row gets a soft mauve left-border and a translucent mauve background.
+
+### Behavior
+
+| Trigger | Behavior |
+|---|---|
+| Page load | Focus drops into search input. List renders frecency-sorted. |
+| Typing | List re-filters via `fzf-for-js` on every keystroke. |
+| Empty input | Frecency-sorted list (no filtering). |
+| Selecting a row | Visual highlight; no other side-effects. |
+
+### Search semantics
+
+`fzf-for-js` scores each candidate per field, then a weighted sum is computed:
+
+```
+final_score = 4 * fzf(title)
+            + 3 * fzf(aliases joined with space)
+            + 2 * fzf(tags joined with space)
+            + 1 * fzf(url)
+            + 0.001 * frecency(bookmark)   # tiebreaker only
+```
+
+Bookmarks with `final_score == 0` (no field matches) are hidden. Empty input bypasses scoring entirely and orders by pure frecency.
+
+### Keymap
+
+| Keys | Context | Action |
+|---|---|---|
+| `↑` / `↓` / `j` / `k` / `Ctrl+N` / `Ctrl+P` | picker | Move selection |
+| `⏎` | picker | Open selected via `/go/:id` (replaces tab) |
+| `⌘⏎` / `Ctrl+⏎` | picker | Open in new tab via `window.open("/go/:id", "_blank")` |
+| `⌘N` | picker | Open Add modal |
+| `⌘E` | picker | Open Edit modal (prefilled from selected row) |
+| `⌘D` | picker | Delete confirm — row reddens, second `⌘D` within 2s deletes |
+| `/` | picker | Focus search input if unfocused |
+| `⎋` | picker | Clear input if any, else nothing |
+| `Tab` / `Shift+Tab` | modal | Cycle fields: URL → Title → Tags → Aliases → Cancel → Save → URL |
+| `⏎` | modal | Submit |
+| `⌘⏎` | modal | Submit (muscle-memory parity with picker) |
+| `⎋` | modal | Cancel & close |
+
+Vim `j`/`k` are also enabled in the picker (the user prefers vim motions). They're only intercepted when the search input is empty *or* not focused — typing `j` into the search field still types `j`.
+
+### Modal — add / edit
+
+Same component, different title and initial values. Fields:
+
+- **URL** — required, validated client-side as a URL before POST.
+- **Title** — required, defaults to URL hostname if left blank.
+- **Tags** — optional, comma-separated input → string array on save.
+- **Aliases** — optional, comma-separated input → string array on save.
+
+Modal traps focus. After successful save: modal closes, `/api/bookmarks` re-fetched, newly-created row auto-selected.
+
+### Delete UX
+
+`⌘D` on a selected row → row turns red, footer shows "Press ⌘D again to confirm." Second `⌘D` within 2s → row is deleted, list re-renders. Any other key cancels. No undo in v1 (toast undo is v1.1).
+
+## 7. CLI
+
+```
+snackpage serve [flags]
+  --addr string       Address to listen on (default "127.0.0.1:8765")
+  --data-dir string   Override XDG data dir
+  --log-level string  debug|info|warn|error  (default "info")
+
+snackpage build [flags]    # v2
+  --out string        Output directory (default "./dist")
+  --data-dir string   Override XDG data dir
+
+snackpage version           # prints version + git SHA + build date
+snackpage --help
+snackpage <subcmd> --help
+```
+
+Flag parsing via stdlib `flag` package. No `cobra`, no `urfave/cli`. Three subcommands is below the threshold where a framework starts paying for itself.
+
+## 8. Project layout
+
+```
+snackpage/
+├── cmd/snackpage/
+│   └── main.go              # subcommand dispatch, flag parsing
+├── internal/
+│   ├── server/
+│   │   ├── server.go        # mux, embed.FS, lifecycle
+│   │   ├── bookmarks.go     # CRUD handlers
+│   │   ├── redirect.go      # /go/:id handler + stats bump
+│   │   ├── middleware.go    # logging, recovery, content-type
+│   │   └── server_test.go
+│   ├── store/
+│   │   ├── store.go         # combined facade
+│   │   ├── bookmarks.go     # bookmarks.json read/write
+│   │   ├── state.go         # state.json read/write
+│   │   ├── atomic.go        # write-tmp-and-rename helper
+│   │   └── store_test.go
+│   ├── frecency/
+│   │   ├── frecency.go      # pure scoring fn
+│   │   └── frecency_test.go # table-driven
+│   └── xdg/
+│       └── xdg.go           # XDG_DATA_HOME / XDG_CONFIG_HOME resolution
+├── web/
+│   ├── index.html           # one HTML file
+│   ├── app.js               # vanilla JS, ~300 LOC target
+│   ├── style.css            # Catppuccin Mocha
+│   └── vendor/
+│       └── fzf.min.js       # fzf-for-js, pinned version, attribution in NOTICE
+├── testdata/
+│   ├── bookmarks.golden.json
+│   └── state.golden.json
+├── docs/
+│   └── superpowers/specs/2026-05-23-snackpage-design.md  # this file
+├── NOTICE                   # licenses for vendored JS
+├── go.mod
+├── go.sum
+├── Makefile                 # build, test, run, lint, fmt
+├── README.md
+└── .gitignore
+```
+
+## 9. Testing strategy
+
+### Unit tests (per package)
+
+- **`internal/frecency`** — table-driven tests across the decay curve, edge cases (never visited, far future, exactly-on-boundary).
+- **`internal/store`** — round-trip read/write, atomic-rename failure paths, malformed JSON, concurrent reads, deduplication of tags.
+- **`internal/xdg`** — env precedence, fallback to default, expansion of `~`.
+
+### Integration tests (in `internal/server`)
+
+- `httptest.NewServer` with a temporary `data-dir`.
+- Each endpoint: happy path + at least two failure modes (400, 404).
+- `/go/:id` bumps `state.json` exactly once per request, even under concurrent requests (use `t.Parallel` + a shared in-memory state).
+- Atomic write verified by checking only the `.tmp` exists mid-write (`t.Cleanup` finishes the write).
+
+### Frontend smoke test
+
+A tiny `playwright` or `puppeteer` script (deferred to v1.1 if it adds friction) that loads `localhost:8765`, types `kub`, hits Enter, asserts we end up on a `/go/:id` redirect → expected URL. Not in v1's critical path.
+
+### Coverage target
+
+`go test -cover ./...` ≥ 80% on `internal/`. `cmd/snackpage` doesn't need coverage; it's just wiring.
+
+## 10. Roadmap
+
+### v1 (this spec)
+
+`serve` daemon, full in-page CRUD, frecency, redirect tracking, embedded assets, README documents both the off-the-shelf Chrome extension recipe and the `defaults write com.google.Chrome NewTabPageLocation` policy fallback.
+
+### v1.1 — polish
+
+- Toast confirmations (Saved / Deleted)
+- "Recently deleted" undo (5-second window, in-memory)
+- `snackpage --version` with build info
+- golangci-lint + GitHub Actions CI
+- Optional Playwright smoke test in CI
+
+### v2 — autostart & static export
+
+- macOS LaunchAgent recipe + `make install-launchagent`
+- Linux systemd user unit + `make install-systemd-user`
+- `snackpage build` subcommand emits standalone `index.html` with bookmarks inlined; localStorage handles frecency in absence of daemon
+
+### v3 — import & power-user
+
+- `snackpage import chrome [--profile NAME]` — read Chrome bookmarks JSON, interactive preview/select
+- `pinned` boolean field; pinned rows stick above the frecency list
+- Optional favicons cached to `$XDG_CACHE_HOME/snackpage/favicons/`, served via `/static/favicon/:host`
+
+### v4 — first-party extension
+
+- Chrome/Firefox extension we maintain
+- Adds "Save current tab" hotkey (`Cmd+Shift+S`) that POSTs to the daemon and opens snackpage with the add modal prefilled
+- Replaces the off-the-shelf "New Tab Redirect"
+
+### Forever non-goals
+
+Multi-user, hosted SaaS, mobile-responsive layout, built-in sync, network exposure beyond loopback.
+
+## 11. Open questions
+
+None at time of writing. Decisions to revisit during implementation:
+
+- Final default port (`8765` is a placeholder — verify it's not common in the user's environment).
+- Whether to ship a `Brewfile`/`tap` for distribution after v1.1.
+- Exact frecency curve numbers — these are a guess; tune after a week of dogfooding.
