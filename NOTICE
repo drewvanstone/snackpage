@@ -1,0 +1,7 @@
+snackpage
+Copyright 2026 Drew Flower
+
+This product bundles fzf-for-js, which is available under the MIT license.
+See https://github.com/ajitid/fzf-for-js for source.
+The vendored copy lives at internal/web/assets/vendor/fzf.umd.min.js.
+Version and sha256 are recorded inline at the top of that file.
