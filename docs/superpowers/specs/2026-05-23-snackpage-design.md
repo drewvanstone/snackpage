@@ -398,11 +398,30 @@ A tiny `playwright` or `puppeteer` script (deferred to v1.1 if it adds friction)
 - Optional favicons cached to `$XDG_CACHE_HOME/snackpage/favicons/`, served via `/static/favicon/:host`
 - **Catppuccin Latte (light variant)** auto-switching based on `$XDG_CONFIG_HOME/catppuccin-theme/current-variant` (matches the user's existing theme-switching setup)
 
-### v4 — first-party extension
+### v4 — snackpage as multi-browser bookmark backend
 
-- Chrome/Firefox extension we maintain
-- Adds "Save current tab" hotkey (`Cmd+Shift+S`) that POSTs to the daemon and opens snackpage with the add modal prefilled
-- Replaces the off-the-shelf "New Tab Redirect"
+**Motivation:** I use Safari personally and Chrome at work (corporate-mandated). I want to own my bookmarks independent of any single browser, and have them portable across browsers AND across workstations. The browser's own bookmark UI (address-bar autocomplete, bookmarks bar, ⌘D bookmark-this-page dialog) should become a read-only mirror of snackpage. snackpage becomes the canonical source; each browser is a "view."
+
+The data is already portable across workstations via the JSON file (sync via git/Syncthing/iCloud — see spec §10 non-goals). v4 is about making it portable across **browsers** too.
+
+Implementation tiers, cumulative — ship the lowest tier first, add higher tiers if/when they earn it:
+
+**4.1 — One-shot HTML export.** `snackpage export html [--out FILE]` writes the W3C Netscape Bookmark File format. Manual import into any browser. Trivial (~50 lines), multi-browser by accident, no extension required.
+
+**4.2 — Direct file write per browser** (browser must be closed when run). `snackpage export chrome [--profile NAME]` writes Chrome's `Bookmarks` JSON with a top-level `snackpage` folder, subfolders by tag, the bookmark inside. If signed in, Chrome Sync replicates to other Chrome installs for free. Could be scheduled via LaunchAgent at e.g. 3am when Chrome is likely closed. ~150 lines per browser format. Each browser adds another `snackpage export <browser>` subcommand.
+
+**4.3 — Chromium companion extension `snackpage-companion`.** Polls or subscribes to `localhost:8765/api/bookmarks` (SSE if we add it), mirrors snackpage into Chrome's bookmark folder live via `chrome.bookmarks` API. One-way sync, snackpage is canonical. Same codebase covers Chrome, Brave, Edge, Vivaldi, Arc, Opera. Folds in the new-tab override (replaces the off-the-shelf "New Tab Redirect") and a "Save current tab" hotkey (`Cmd+Shift+S`) that POSTs to the daemon and opens snackpage with the add modal prefilled.
+
+**4.4 — Firefox port.** Same JS as 4.3, different `manifest.json` (background-page semantics, namespace differences). 5-line polyfill for `chrome.*` ↔ `browser.*`. ~1-2 hours from a working Chromium extension.
+
+**4.5 — Safari support.** Xcode app wrapper + macOS signing. The extension JS itself is portable from 4.3; cost is in the ~500 lines of Swift boilerplate, the developer-signing dance, and "Allow Unsigned Extensions" toggling. ~1-2 days for a single-developer setup.
+
+**4.6 — Two-way sync** (optional, not yet committed). User adds a bookmark via the browser's native ⌘D dialog → it flows back to snackpage. Adds conflict resolution to the design (what if the same URL is edited in both?). Real engineering project — probably gated on whether v4.3-4.5 actually meet daily needs.
+
+### v5+ — beyond
+
+- Possibly: importers for other browsers (`snackpage import safari`, `snackpage import firefox`) for one-shot migrations into snackpage.
+- Possibly: a richer page-fetch tagging assistant (the Phase 2 Claude skill mentioned in §11) productized as a `--curate` flag on `import`.
 
 ### Forever non-goals
 
