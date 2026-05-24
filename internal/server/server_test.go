@@ -217,7 +217,10 @@ func TestRedirect_BumpsStatsAndRedirects(t *testing.T) {
 	}
 
 	// Verify GET /api/bookmarks now shows visit_count: 1
-	listResp, _ := http.Get(ts.URL + "/api/bookmarks")
+	listResp, err := http.Get(ts.URL + "/api/bookmarks")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer listResp.Body.Close()
 	listBody, _ := io.ReadAll(listResp.Body)
 	if !strings.Contains(string(listBody), `"visit_count":1`) {
