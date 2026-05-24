@@ -4,6 +4,13 @@
 # Dev-isolation XDG data dir (see Makefile dev-* targets)
 .dev/
 
+# Frontend test artifacts (see tests/frontend/)
+tests/frontend/node_modules/
+tests/frontend/test-results/
+tests/frontend/playwright-report/
+tests/frontend/blob-report/
+tests/frontend/.cache/
+
 # Built binary
 /snackpage
 

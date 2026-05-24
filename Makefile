@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt run dev-run dev-demo dev-add clean install e2e
+.PHONY: all build test test-frontend setup-frontend lint fmt run dev-run dev-demo dev-add clean install e2e
 
 BIN := snackpage
 PREFIX ?= $(HOME)/.local
@@ -57,3 +57,13 @@ clean:
 
 e2e: build
 	@bash scripts/e2e.sh
+
+# Frontend smoke tests via Playwright. Run setup-frontend once; then
+# test-frontend on every change. Spawns the binary via Playwright's
+# webServer config and tears it down after.
+setup-frontend:
+	cd tests/frontend && npm install
+	cd tests/frontend && npx playwright install chromium
+
+test-frontend: build
+	cd tests/frontend && npx playwright test

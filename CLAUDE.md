@@ -53,6 +53,10 @@ If you skipped one of these, ask yourself why before committing.
   - `internal/server`: ≥80% (integration paths)
   - `cmd/snackpage`: not required (it's the entry point; covered by `make e2e`)
 - `make e2e` runs `scripts/e2e.sh` — a curl-based end-to-end smoke test against a fresh binary. **Known flake:** uses `sleep 0.3` after starting the server; on cold-binary first launch it can race. Re-run usually succeeds. Replace with poll-until-healthz when annoyed enough.
+- `make test-frontend` runs Playwright smoke tests in `tests/frontend/` against a freshly-built binary. Playwright's `webServer` config polls `/healthz` so there's no sleep race. Tests cover: list load, fuzzy filter, mode toggle (Esc → normal, `i` → insert), j/k navigation in normal mode, Enter → `/go/:id` redirect.
+- First-time setup: `make setup-frontend` (downloads Playwright's bundled Chromium, ~150MB to `~/Library/Caches/ms-playwright/`).
+- **Test artifacts** (`tests/frontend/node_modules/`, `test-results/`, `playwright-report/`) are gitignored. The config + specs are committed.
+- **Playwright artifact:** headless Chromium doesn't always honor `autofocus` like a real browser. Tests explicitly `await page.locator("#q").focus()` in `beforeEach` to mirror real-user landing state. This is a test-side workaround, not a snackpage bug.
 
 ## Dev workflow
 
