@@ -113,6 +113,8 @@ snackpage is a vim-style modal editor:
 
 Toggle with `Esc` (insert → normal) and `i` / `a` / `/` (normal → insert).
 
+The list starts empty — type to filter. Backspacing back to empty hides the list again. snackpage is a launcher, not a bookmark browser; the first keystroke is the point.
+
 | Keys | Action |
 |---|---|
 | `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | Move selection |

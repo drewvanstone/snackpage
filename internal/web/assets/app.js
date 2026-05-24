@@ -42,7 +42,7 @@ async function load() {
 function refresh() {
   const q = $q.value.trim();
   if (q === "") {
-    state.view = sortByFrecency(state.bookmarks);
+    state.view = [];
   } else {
     state.view = fuzzyRank(q, state.bookmarks);
   }
@@ -90,13 +90,6 @@ function fuzzyRank(q, items) {
   }));
   ranked.sort((a, z) => z.score - a.score);
   return ranked.map(r => r.item);
-}
-
-function sortByFrecency(items) {
-  const now = Date.now();
-  const scored = items.map(b => ({ b, score: frecency(b, now), title: b.title.toLowerCase() }));
-  scored.sort((a, z) => z.score - a.score || a.title.localeCompare(z.title));
-  return scored.map(s => s.b);
 }
 
 function frecency(b, now) {

@@ -121,12 +121,16 @@ Browser → server.handleIndex → serve internal/web/assets/index.html
        → app.js loads, fetches /api/bookmarks
        → server.handleListBookmarks → store.List() → snapshot (bms, stats)
        → bookmarkView{} merges stats into wire shape → JSON
-       → app.js renders frecency-sorted list
+       → app.js renders an EMPTY list (the picker is a launcher, not a browser)
 ```
 
 ### Search → Open
 
 ```
+Empty input → render no rows (the picker is a launcher, not a bookmark browser).
+Typed input → fzf-for-js scored ranking across title (weight 4) > aliases (3)
+              > tags (2) > url (1). Frecency adds a small tiebreak nudge.
+
 Keystroke → refresh() → fuzzyRank(query, state.bookmarks)
          → fzf-for-js scores each field (title×4 / aliases×3 / tags×2 / url×1)
          → frecency tiebreak → render

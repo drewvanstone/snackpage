@@ -3,8 +3,10 @@ import { test, expect } from "@playwright/test";
 test.describe("snackpage picker — keymap and modes", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
+    // List is empty by default — wait for the count text to populate as proof
+    // that /api/bookmarks has loaded. Individual tests type to reveal rows.
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0,
+      () => document.getElementById("count")?.textContent !== "",
       null,
       { timeout: 5_000 }
     );
@@ -66,22 +68,22 @@ test.describe("snackpage picker — keymap and modes", () => {
 
   test("j/k navigates only in normal mode", async ({ page }) => {
     // Insert mode: typing "j" populates the input, not navigation.
-    const initialId = await page
-      .locator('#list li[aria-selected="true"]')
-      .getAttribute("data-id");
     await page.keyboard.press("j");
     // Input should now contain "j"
     await expect(page.locator("#q")).toHaveValue("j");
 
-    // Clear and enter normal mode
-    await page.locator("#q").fill("");
+    // Clear input, then prime with a query that yields multiple rows so
+    // j/k has somewhere to navigate. Then drop into normal mode.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 1
+    );
     await page.keyboard.press("Escape");
     await expect(page.locator("#picker")).toHaveAttribute(
       "data-mode",
       "normal"
     );
 
-    // Refresh — selection may have shifted due to filter clearing; recapture
     const beforeJ = await page
       .locator('#list li[aria-selected="true"]')
       .getAttribute("data-id");
@@ -96,12 +98,15 @@ test.describe("snackpage picker — keymap and modes", () => {
       .locator('#list li[aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterK).toBe(beforeJ);
-
-    // Initial reference is used so eslint doesn't complain about unused var.
-    expect(initialId).toBeTruthy();
   });
 
   test("arrow keys navigate in both modes", async ({ page }) => {
+    // Prime the list with a multi-row result first.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 1
+    );
+
     // Insert mode
     const insertStart = await page
       .locator('#list li[aria-selected="true"]')
@@ -130,6 +135,12 @@ test.describe("snackpage picker — keymap and modes", () => {
   });
 
   test("Ctrl+N / Ctrl+P navigate in both modes", async ({ page }) => {
+    // Prime the list with a multi-row result first.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 1
+    );
+
     const start = await page
       .locator('#list li[aria-selected="true"]')
       .getAttribute("data-id");
@@ -208,6 +219,11 @@ test.describe("snackpage picker — keymap and modes", () => {
   });
 
   test("Enter on selected row hits /go/:id", async ({ page }) => {
+    // Need rows to have something to open — type first.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 0
+    );
     const id = await page
       .locator('#list li[aria-selected="true"]')
       .getAttribute("data-id");
