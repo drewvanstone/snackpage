@@ -1,6 +1,9 @@
 # Brainstorming companion artefacts
 .superpowers/
 
+# Dev-isolation XDG data dir (see Makefile dev-* targets)
+.dev/
+
 # Built binary
 /snackpage
 
