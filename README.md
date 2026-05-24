@@ -72,17 +72,26 @@ Install [New Tab Override](https://addons.mozilla.org/firefox/addon/new-tab-over
 
 ## Use
 
+### Modes
+
+snackpage is a vim-style modal editor:
+
+- **Insert** (default on page load): typing filters the list, search input is focused, prompt glyph is yellow.
+- **Normal** (after `Esc`): input blurred but query preserved, `j`/`k` navigates, prompt glyph is mauve.
+
+Toggle with `Esc` (insert → normal) and `i` / `a` / `/` (normal → insert).
+
 | Keys | Action |
 |---|---|
 | `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | Move selection |
-| `j` / `k` | Move selection (only when input is empty) |
+| `j` / `k` | Move selection (Normal mode only) |
 | `⏎` | Open selected (replaces current tab) |
 | `⌘⏎` / `Ctrl+⏎` | Open in a new tab |
 | `⌘I` | Add bookmark |
 | `⌘E` | Edit selected bookmark |
 | `⌘D` | Delete selected — second `⌘D` within 2s confirms |
-| `/` | Focus search input |
-| `⎋` | Clear search if any, else blur |
+| `⎋` | Insert → Normal mode (preserves query). Normal → no-op. |
+| `i` / `a` / `/` | Normal → Insert mode (focuses input, cursor at end). |
 | `Tab` / `Shift+Tab` (in modal) | Cycle fields |
 | `⏎` (in modal) | Save |
 | `⎋` (in modal) | Cancel |

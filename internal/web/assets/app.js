@@ -5,11 +5,22 @@ const state = {
   bookmarks: [],   // [{id,title,url,tags,aliases,visit_count,last_visit_at}]
   view: [],        // filtered + sorted subset rendered to DOM
   selected: 0,     // index into view
+  mode: "insert",  // "insert" | "normal" — vim-style modal editor mode
 };
 
 const $q = document.getElementById("q");
 const $list = document.getElementById("list");
 const $count = document.getElementById("count");
+const $picker = document.getElementById("picker");
+
+function setMode(m) {
+  state.mode = m;
+  if ($picker) $picker.setAttribute("data-mode", m);
+}
+
+// Mode follows the input's focus state: focused = insert, blurred = normal.
+$q.addEventListener("focus", () => setMode("insert"));
+$q.addEventListener("blur", () => setMode("normal"));
 
 async function load() {
   const r = await fetch("/api/bookmarks");
@@ -189,22 +200,28 @@ document.addEventListener("keydown", (e) => {
   }
 
   const inInput = document.activeElement === $q;
-  const empty = $q.value === "";
 
-  // Navigation: arrows + Ctrl+N/P (always); j/k (only when input is empty)
+  // Navigation: arrows + Ctrl+N/P (always); j/k (normal mode only)
   if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
     e.preventDefault(); move(1); return;
   }
   if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
     e.preventDefault(); move(-1); return;
   }
-  if ((!inInput || empty) && (e.key === "j")) {
-    if (inInput && empty) { e.preventDefault(); move(1); return; }
-    if (!inInput) { e.preventDefault(); move(1); return; }
+  if (state.mode === "normal" && e.key === "j") {
+    e.preventDefault(); move(1); return;
   }
-  if ((!inInput || empty) && (e.key === "k")) {
-    if (inInput && empty) { e.preventDefault(); move(-1); return; }
-    if (!inInput) { e.preventDefault(); move(-1); return; }
+  if (state.mode === "normal" && e.key === "k") {
+    e.preventDefault(); move(-1); return;
+  }
+
+  // Normal-mode → insert-mode: i / a focus the input, cursor at end of query.
+  if (state.mode === "normal" && (e.key === "i" || e.key === "a")) {
+    e.preventDefault();
+    $q.focus();
+    const len = $q.value.length;
+    $q.setSelectionRange(len, len);
+    return;
   }
 
   if (e.key === "Enter") {
@@ -212,8 +229,9 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault(); openSelected(false); return;
   }
   if (e.key === "Escape") {
-    if ($q.value !== "") { $q.value = ""; refresh(); }
-    else $q.blur();
+    // Insert → normal: blur the input (mode flips via the blur listener).
+    // Normal: no-op (vim-faithful).
+    if (state.mode === "insert") $q.blur();
     return;
   }
   if (e.key === "/" && !inInput) {

@@ -77,6 +77,11 @@ body {
   caret-color: var(--rosewater);
 }
 
+/* Vim-style modal editor: normal mode dims the prompt glyph to mauve and
+   hides the caret to reinforce that typing won't reach the input. */
+.picker[data-mode="normal"] .prompt .glyph { color: var(--mauve); }
+.picker[data-mode="normal"] .prompt input { caret-color: transparent; }
+
 .list {
   list-style: none;
   max-height: 60vh;
