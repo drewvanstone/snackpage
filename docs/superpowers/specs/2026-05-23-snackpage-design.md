@@ -462,6 +462,14 @@ Catches platform-specific regressions (Chrome bookmarks path resolver, future sy
 
 **2.6 — homebrew-core upstreaming** *(optional, much later).* Once snackpage is stable and externally tested, submit to homebrew-core so `brew install snackpage` works without the tap prefix. Multi-week review process; only worth it if other people start using snackpage.
 
+**2.7 — Memorable local-domain URL.** Today the picker lives at `http://127.0.0.1:8765`. A friendlier URL would feel more "real" — and matters mostly for documentation/screenshots, since the URL is rarely typed in normal use (the new-tab override hides it). Three tiers, escalating in setup cost and payoff:
+
+- **2.7a — `*.localhost` (zero config, available immediately).** Modern browsers resolve `snackpage.localhost` (and any `*.localhost`) to 127.0.0.1 per RFC 6761. No DNS edits, no daemon work. URL becomes `http://snackpage.localhost:8765` — port stays, but the host is memorable. Document in README as the recommended URL for the new-tab redirect.
+- **2.7b — `*.local` via mDNS (macOS-native, no sudo).** Daemon publishes itself via Bonjour: roughly `dns-sd -P snackpage _http._tcp local 8765 snackpage.local 127.0.0.1`, either as a goroutine in `serve` using a small mDNS library or as a sibling launchd service. URL becomes `http://snackpage.local:8765`. macOS-first; Linux needs Avahi running (commonly present but not universal). Port stays unless we go to tier 2.7c.
+- **2.7c — `/etc/hosts` + port 80 (the "real domain" path).** `snackpage service install` prompts for sudo once, adds `127.0.0.1 snackpage.local` to `/etc/hosts`, and configures launchd / systemd to give the daemon port 80 (or installs a tiny reverse proxy listening on 80 that forwards to 8765). URL becomes `http://snackpage.local` — no port. Most setup, most polished result.
+
+Recommended sequencing: ship 2.7a (just a README sentence) alongside the brew install in 2.3, then evaluate whether 2.7b or 2.7c earn their complexity once you've been using snackpage at scale.
+
 **Static export as a distribution-adjacent feature:** `snackpage build [--out DIR]` emits a standalone `index.html` with bookmarks inlined as JS data. Frecency runs in `localStorage`. Lets the picker work on a static host (or `file://`) with no daemon. Useful if Drew wants snackpage published to e.g. GitHub Pages from his work laptop. Lives in v2 but technically independent of the install/lifecycle story.
 
 ### v3 — power-user features
