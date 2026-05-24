@@ -37,6 +37,16 @@ snackpage demo
 
 Seeds 100 well-known sites (Google, GitHub, Wikipedia, etc.) with a deterministic pseudo-random visit history into a tempdir and serves the picker. The tempdir is removed on shutdown — `$XDG_DATA_HOME/snackpage/` is never touched.
 
+### Adding from the command line
+
+Add a single bookmark from your shell:
+
+```bash
+snackpage add https://example.com --title "Example" --tags work,demo --aliases ex
+```
+
+If a snackpage daemon is running, the add goes through its API (so the picker updates immediately). If no daemon is running, the bookmark is written directly to `$XDG_DATA_HOME/snackpage/bookmarks.json`. Either way, the result is the same.
+
 ## Point your browser at it
 
 `snackpage` serves at `http://127.0.0.1:8765`. The trick is making **Cmd+T** open it instead of the browser's default new-tab page.

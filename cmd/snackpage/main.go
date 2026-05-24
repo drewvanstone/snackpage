@@ -32,6 +32,8 @@ func main() {
 		os.Exit(runServe(args))
 	case "demo":
 		os.Exit(runDemo(args))
+	case "add":
+		os.Exit(runAdd(args))
 	case "version", "--version", "-v":
 		fmt.Println("snackpage", version)
 	case "help", "--help", "-h":
@@ -47,6 +49,7 @@ func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage:
   snackpage serve [--addr 127.0.0.1:8765] [--data-dir PATH] [--log-level info]
   snackpage demo  [--addr 127.0.0.1:8765] [--log-level info]
+  snackpage add URL [--title T] [--tags t1,t2] [--aliases a1,a2] [--addr 127.0.0.1:8765] [--data-dir PATH]
   snackpage version
   snackpage help`)
 }
