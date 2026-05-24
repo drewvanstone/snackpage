@@ -385,18 +385,72 @@ A tiny `playwright` or `puppeteer` script (deferred to v1.1 if it adds friction)
 - golangci-lint + GitHub Actions CI
 - Optional Playwright smoke test in CI
 
-### v2 — autostart & static export
+### v2 — distribution & lifecycle
 
-- macOS LaunchAgent recipe + `make install-launchagent`
-- Linux systemd user unit + `make install-systemd-user`
-- `snackpage build` subcommand emits standalone `index.html` with bookmarks inlined; localStorage handles frecency in absence of daemon
+**Motivation:** "It should be easy to install snackpage and have it running in the background." Today it's `git clone && make install && snackpage serve` in a tmux pane — fine for me, hostile to anyone else. v2 makes it a one-liner on macOS and Linux. **Linux is first-class**, equal priority with macOS. **Windows is explicitly out of scope** (see Forever non-goals below).
 
-### v3 — import & power-user
+Tiers, ordered cheapest-to-most-expensive so each can ship independently:
 
-- `snackpage import chrome [--profile NAME]` — read Chrome bookmarks JSON, interactive preview/select
-- `pinned` boolean field; pinned rows stick above the frecency list
-- Optional favicons cached to `$XDG_CACHE_HOME/snackpage/favicons/`, served via `/static/favicon/:host`
-- **Catppuccin Latte (light variant)** auto-switching based on `$XDG_CONFIG_HOME/catppuccin-theme/current-variant` (matches the user's existing theme-switching setup)
+**2.1 — Static binary baseline.** Set `CGO_ENABLED=0` for the build so the binary is fully statically linked and trivially portable. Document `make install` (already exists; drops `snackpage` into `$PREFIX/bin`, default `~/.local/bin`). No new code; build-flag and README tweak. ~5 minutes.
+
+**2.2 — `snackpage service` subcommand.** Pure-Go, no shell scripts. Generates and registers the platform-appropriate unit file:
+
+- macOS: writes `~/Library/LaunchAgents/com.drewvanstone.snackpage.plist`, runs `launchctl load`.
+- Linux: writes `~/.config/systemd/user/snackpage.service`, runs `systemctl --user enable --now snackpage`.
+
+Subcommands:
+
+| Verb | Behavior |
+|---|---|
+| `snackpage service install` | Write + register the unit file. Idempotent. |
+| `snackpage service uninstall` | Stop and unregister. |
+| `snackpage service status` | Show running state, last started, exit code. |
+| `snackpage service logs [-f]` | Tail the daemon's log file. |
+
+~200 LOC across `cmd/snackpage/service.go` + platform-specific helpers behind `// +build darwin` / `// +build linux` tags.
+
+**2.3 — Homebrew formula in a personal tap.** `brew install drewvanstone/tap/snackpage`. The formula includes a `service do` block so `brew services start snackpage` works on macOS (via LaunchAgent) and Linux (via Linuxbrew + systemd) without the user touching unit files. Tap repo: `github.com/drewvanstone/homebrew-tap`. Formula is ~50 lines of Ruby. Drew also gains version pinning, auto-update path, and the standard `brew uninstall` for cleanup.
+
+```ruby
+class Snackpage < Formula
+  desc "Personal bookmark datastore with a keyboard-driven picker"
+  homepage "https://github.com/drewvanstone/snackpage"
+  url "https://github.com/drewvanstone/snackpage/archive/v2.0.0.tar.gz"
+  sha256 "…"
+  license "MIT"
+
+  depends_on "go" => :build
+
+  def install
+    system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=#{version}")
+  end
+
+  service do
+    run [opt_bin/"snackpage", "serve"]
+    keep_alive true
+    log_path var/"log/snackpage.log"
+    error_log_path var/"log/snackpage.log"
+  end
+end
+```
+
+**2.4 — README installation matrix.** Clear sections: "macOS via Homebrew", "Linux via Homebrew", "Build from source", each with copy-pasteable steps. Replaces the current "git clone + make install" instruction. ~30 lines of README.
+
+**2.5 — CI on macOS and Linux.** GitHub Actions matrix building + testing on `macos-latest` and `ubuntu-latest`. Catches platform-specific regressions (the Chrome bookmarks path resolver, the systemd unit generator) before they hit users. The lint target (currently silencing golangci-lint findings via `||`) gets fixed up at the same time so CI catches real issues.
+
+**2.6 — homebrew-core upstreaming** *(optional, much later).* Once snackpage is stable and externally tested, submit to homebrew-core so `brew install snackpage` works without the tap prefix. Multi-week review process; only worth it if other people start using snackpage.
+
+**Static export as a distribution-adjacent feature:** `snackpage build [--out DIR]` emits a standalone `index.html` with bookmarks inlined as JS data. Frecency runs in `localStorage`. Lets the picker work on a static host (or `file://`) with no daemon. Useful if Drew wants snackpage published to e.g. GitHub Pages from his work laptop. Lives in v2 but technically independent of the install/lifecycle story.
+
+### v3 — power-user features
+
+- `pinned` boolean field on Bookmark; pinned rows stick above the frecency list.
+- Optional favicons cached to `$XDG_CACHE_HOME/snackpage/favicons/`, served via `/static/favicon/:host`.
+- **Base16-style theming.** Today's Catppuccin Mocha is 20 CSS custom-properties; v3 refactors the CSS to a base16 vocabulary (`--base00..--base0F` plus semantic aliases), ships Catppuccin Mocha + Latte as defaults, allows user themes in `$XDG_CONFIG_HOME/snackpage/themes/`. See `ARCHITECTURE.md` §8.
+- **Layout configuration.** `$XDG_CONFIG_HOME/snackpage/config.json` exposes `layout = "compact" | "detailed"`, `font_size = "sm" | "md" | "lg"`, `theme = "<name>"`. Frontend layout switching is pure CSS; no new render logic.
+- **Bubbletea TUI as a new frontend.** `snackpage tui` subcommand boots a terminal picker reading from the same `store.Store`. Same fuzzy ranking, same modal-editing discipline as the web picker.
+
+(`snackpage import chrome` already shipped in v1.3; see git history for that one.)
 
 ### v4 — snackpage as multi-browser bookmark backend
 
@@ -425,7 +479,7 @@ Implementation tiers, cumulative — ship the lowest tier first, add higher tier
 
 ### Forever non-goals
 
-Multi-user, hosted SaaS, mobile-responsive layout, built-in sync, network exposure beyond loopback.
+Multi-user, hosted SaaS, mobile-responsive layout, built-in sync, network exposure beyond loopback, **Windows support**. macOS and Linux are first-class. Windows might be possible (Go cross-compiles cleanly) but every macOS/Linux-specific path (LaunchAgent vs systemd vs Windows services; XDG vs `%LOCALAPPDATA%`; Chrome Bookmarks file location; `chmod 0700` semantics) adds a third path with no maintainer to test it. If anyone seriously wants Windows support, the right answer is for them to fork.
 
 ## 11. Open questions
 
