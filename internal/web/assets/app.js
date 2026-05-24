@@ -12,10 +12,20 @@ const $q = document.getElementById("q");
 const $list = document.getElementById("list");
 const $count = document.getElementById("count");
 const $picker = document.getElementById("picker");
+const $hints = document.getElementById("hints");
+
+// Footer hints text per mode. The visible affordance should match what the
+// keyboard actually does: in insert you press ⎋ to leave to normal; in
+// normal you press i (or a) to return to insert, and j/k navigate.
+const HINTS = {
+  insert: "↑↓ select · ⏎ open · ⌘I add · ⌘E edit · ⌘D delete · ⎋ normal mode",
+  normal: "j/k select · ⏎ open · ⌘I add · ⌘E edit · ⌘D delete · i insert mode",
+};
 
 function setMode(m) {
   state.mode = m;
   if ($picker) $picker.setAttribute("data-mode", m);
+  if ($hints) $hints.textContent = HINTS[m];
 }
 
 // Mode follows the input's focus state: focused = insert, blurred = normal.
@@ -172,7 +182,12 @@ document.addEventListener("keydown", (e) => {
   if (document.querySelector(".modal-overlay")) return;
 
   const isCmdD = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d";
-  if (!isCmdD) clearPendingDelete();
+  // Standalone modifier keydowns (Meta, Control, Shift, Alt) fire before the
+  // associated letter on physical keyboards and on Playwright; they must not
+  // clear a pending delete or the second ⌘D arrives after the pending state
+  // has been wiped.
+  const isModifier = e.key === "Meta" || e.key === "Control" || e.key === "Shift" || e.key === "Alt";
+  if (!isCmdD && !isModifier) clearPendingDelete();
 
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
     e.preventDefault();
