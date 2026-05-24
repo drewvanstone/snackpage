@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt run clean install
+.PHONY: all build test lint fmt run clean install e2e
 
 BIN := snackpage
 PREFIX ?= $(HOME)/.local
@@ -30,3 +30,6 @@ install: build
 clean:
 	rm -f $(BIN)
 	rm -f coverage.out coverage.html
+
+e2e: build
+	@bash scripts/e2e.sh
