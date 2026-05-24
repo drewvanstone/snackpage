@@ -2,7 +2,7 @@
 
 A keyboard-driven, snacks.nvim-inspired bookmark picker served from `localhost`. Built to be your default browser new-tab page so that **Cmd+T → type → Enter** reaches any saved URL in under two seconds.
 
-![v1 design spec](docs/superpowers/specs/2026-05-23-snackpage-design.md)
+[v1 design spec](docs/superpowers/specs/2026-05-23-snackpage-design.md)
 
 ## Install
 
