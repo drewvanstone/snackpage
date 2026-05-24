@@ -27,6 +27,16 @@ First run creates `$XDG_DATA_HOME/snackpage/` (defaults to `~/.local/share/snack
 
 Override the data dir with `--data-dir PATH`, the address with `--addr HOST:PORT`, and the log level with `--log-level debug|info|warn|error`.
 
+### Demo
+
+Try snackpage without committing real bookmarks:
+
+```bash
+snackpage demo
+```
+
+Seeds 100 well-known sites (Google, GitHub, Wikipedia, etc.) with a deterministic pseudo-random visit history into a tempdir and serves the picker. The tempdir is removed on shutdown — `$XDG_DATA_HOME/snackpage/` is never touched.
+
 ## Point your browser at it
 
 `snackpage` serves at `http://127.0.0.1:8765`. The trick is making **Cmd+T** open it instead of the browser's default new-tab page.
