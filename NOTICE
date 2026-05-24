@@ -1,7 +1,12 @@
 snackpage
 Copyright 2026 Drew Flower
 
-This product bundles fzf-for-js, which is available under the MIT license.
+This product bundles fzf-for-js, which is available under the BSD 3-Clause license.
 See https://github.com/ajitid/fzf-for-js for source.
 The vendored copy lives at internal/web/assets/vendor/fzf.umd.min.js.
-Version and sha256 are recorded inline at the top of that file.
+
+fzf-for-js
+  version: 0.5.2
+  source:  https://cdn.jsdelivr.net/npm/fzf@0.5.2/dist/fzf.umd.min.js
+  sha256:  14964aaa453d279cf4ea7119bcd979b06d028723542d3d4a83efa53f21c6d15b
+  fetched: 2026-05-23
