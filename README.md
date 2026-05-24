@@ -68,7 +68,7 @@ Install [New Tab Override](https://addons.mozilla.org/firefox/addon/new-tab-over
 | `j` / `k` | Move selection (only when input is empty) |
 | `⏎` | Open selected (replaces current tab) |
 | `⌘⏎` / `Ctrl+⏎` | Open in a new tab |
-| `⌘N` | Add bookmark |
+| `⌘I` | Add bookmark |
 | `⌘E` | Edit selected bookmark |
 | `⌘D` | Delete selected — second `⌘D` within 2s confirms |
 | `/` | Focus search input |

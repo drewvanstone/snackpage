@@ -163,7 +163,7 @@ document.addEventListener("keydown", (e) => {
   const isCmdD = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d";
   if (!isCmdD) clearPendingDelete();
 
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
     e.preventDefault();
     openModal({
       title: "Add bookmark",
