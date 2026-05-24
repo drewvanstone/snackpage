@@ -47,6 +47,28 @@ snackpage add https://example.com --title "Example" --tags work,demo --aliases e
 
 If a snackpage daemon is running, the add goes through its API (so the picker updates immediately). If no daemon is running, the bookmark is written directly to `$XDG_DATA_HOME/snackpage/bookmarks.json`. Either way, the result is the same.
 
+### Importing from Chrome
+
+Bulk-import your existing Chrome bookmarks:
+
+```bash
+# Preview what would be imported
+snackpage import chrome --dry-run
+
+# Do it
+snackpage import chrome
+
+# Limit to a single folder
+snackpage import chrome --folder "Bookmarks bar/Dev"
+
+# Different profile
+snackpage import chrome --profile "Profile 2"
+```
+
+Each Chrome bookmark's immediate-parent folder name becomes its tag (lowercased). URLs that already exist in snackpage are skipped — so re-running is idempotent.
+
+Supported on macOS (`~/Library/Application Support/Google/Chrome/<profile>/Bookmarks`) and Linux (`~/.config/google-chrome/<profile>/Bookmarks`). Use `--path` to point at the Bookmarks file directly on other platforms.
+
 ## Point your browser at it
 
 `snackpage` serves at `http://127.0.0.1:8765`. The trick is making **Cmd+T** open it instead of the browser's default new-tab page.

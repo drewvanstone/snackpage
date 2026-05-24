@@ -34,6 +34,8 @@ func main() {
 		os.Exit(runDemo(args))
 	case "add":
 		os.Exit(runAdd(args))
+	case "import":
+		os.Exit(runImport(args))
 	case "version", "--version", "-v":
 		fmt.Println("snackpage", version)
 	case "help", "--help", "-h":
@@ -50,6 +52,7 @@ func printUsage() {
   snackpage serve [--addr 127.0.0.1:8765] [--data-dir PATH] [--log-level info]
   snackpage demo  [--addr 127.0.0.1:8765] [--log-level info]
   snackpage add URL [--title T] [--tags t1,t2] [--aliases a1,a2] [--addr 127.0.0.1:8765] [--data-dir PATH]
+  snackpage import chrome [--profile Default] [--path FILE] [--data-dir PATH] [--folder "Bookmarks bar/Dev"] [--dry-run]
   snackpage version
   snackpage help`)
 }

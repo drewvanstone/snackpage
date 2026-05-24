@@ -1,0 +1,40 @@
+{
+  "checksum": "ignored",
+  "roots": {
+    "bookmark_bar": {
+      "type": "folder",
+      "name": "Bookmarks bar",
+      "children": [
+        {"type": "url", "name": "Google", "url": "https://www.google.com"},
+        {
+          "type": "folder",
+          "name": "Dev",
+          "children": [
+            {"type": "url", "name": "GitHub", "url": "https://github.com"},
+            {"type": "url", "name": "Stack Overflow", "url": "https://stackoverflow.com"},
+            {
+              "type": "folder",
+              "name": "Go",
+              "children": [
+                {"type": "url", "name": "pkg.go.dev", "url": "https://pkg.go.dev"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "other": {
+      "type": "folder",
+      "name": "Other bookmarks",
+      "children": [
+        {"type": "url", "name": "Wikipedia", "url": "https://en.wikipedia.org"}
+      ]
+    },
+    "synced": {
+      "type": "folder",
+      "name": "Mobile bookmarks",
+      "children": []
+    }
+  },
+  "version": 1
+}
