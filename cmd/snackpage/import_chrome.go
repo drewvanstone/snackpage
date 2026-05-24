@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/drewvanstone/snackpage/internal/store"
@@ -61,7 +62,41 @@ func runImportChrome(args []string) int {
 	// Read + parse
 	data, err := os.ReadFile(bookmarksPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "snackpage import chrome: cannot read %s: %v\n", bookmarksPath, err)
+		// If the user supplied --path explicitly, just surface the raw error;
+		// profile discovery doesn't apply.
+		if *path != "" || !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "snackpage import chrome: cannot read %s: %v\n", bookmarksPath, err)
+			return 1
+		}
+		// --profile path failed with ENOENT — try to be helpful.
+		userDataDir, derr := chromeUserDataDir()
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "snackpage import chrome: cannot read %s: %v\n", bookmarksPath, err)
+			return 1
+		}
+		if _, statErr := os.Stat(userDataDir); errors.Is(statErr, os.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "snackpage import chrome: Chrome user data dir not found at %s — is Chrome installed?\n", userDataDir)
+			return 1
+		}
+		profiles, lerr := listChromeProfiles(userDataDir)
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "snackpage import chrome: cannot enumerate profiles in %s: %v\n", userDataDir, lerr)
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "snackpage import chrome: Chrome profile %q not found (no Bookmarks file at %s).\n\n", *profile, bookmarksPath)
+		fmt.Fprintf(os.Stderr, "Available profiles in %s:\n", userDataDir)
+		fmt.Fprint(os.Stderr, formatProfileList(profiles))
+		// Suggest the most-bookmarked profile as a helpful next step.
+		if len(profiles) > 0 {
+			// Pick whichever has the most bookmarks (ties broken by Dir name).
+			best := profiles[0]
+			for _, p := range profiles {
+				if p.BookmarkCount > best.BookmarkCount {
+					best = p
+				}
+			}
+			fmt.Fprintf(os.Stderr, "\nTry: snackpage import chrome --profile %q\n", best.Dir)
+		}
 		return 1
 	}
 	var cf chromeFile
@@ -236,4 +271,153 @@ func findChildByName(folder *chromeNode, name string) *chromeNode {
 		}
 	}
 	return nil
+}
+
+// chromeUserDataDir returns the OS-specific Chrome user data directory
+// (the parent of profile directories). Mirror of chromeBookmarksPath logic
+// but stopping one level shallower.
+func chromeUserDataDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Google", "Chrome"), nil
+	case "linux":
+		return filepath.Join(home, ".config", "google-chrome"), nil
+	default:
+		return "", fmt.Errorf("unsupported OS %q", runtime.GOOS)
+	}
+}
+
+type chromeProfileInfo struct {
+	Dir           string // e.g. "Profile 2"
+	Name          string // e.g. "nvidia.com"  (from info_cache.name)
+	UserName      string // e.g. "dflower@nvidia.com" (info_cache.user_name)
+	GaiaName      string // "Drew Flower US" (info_cache.gaia_name)
+	BookmarkCount int
+	HasBookmarks  bool // true if Bookmarks file exists
+}
+
+// listChromeProfiles enumerates profile directories under userDataDir that
+// contain a Bookmarks file, augmenting with metadata from Local State.
+func listChromeProfiles(userDataDir string) ([]chromeProfileInfo, error) {
+	entries, err := os.ReadDir(userDataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read Local State for human metadata (best-effort).
+	type infoCache struct {
+		Name     string `json:"name"`
+		UserName string `json:"user_name"`
+		GaiaName string `json:"gaia_name"`
+	}
+	type localState struct {
+		Profile struct {
+			InfoCache map[string]infoCache `json:"info_cache"`
+		} `json:"profile"`
+	}
+	var ls localState
+	if data, err := os.ReadFile(filepath.Join(userDataDir, "Local State")); err == nil {
+		_ = json.Unmarshal(data, &ls)
+	}
+
+	var out []chromeProfileInfo
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Only directories named "Default" or "Profile <N>" qualify.
+		if name != "Default" && !strings.HasPrefix(name, "Profile ") {
+			continue
+		}
+		bmPath := filepath.Join(userDataDir, name, "Bookmarks")
+		bmData, err := os.ReadFile(bmPath)
+		if err != nil {
+			continue // profile dir exists but no Bookmarks file
+		}
+		p := chromeProfileInfo{Dir: name, HasBookmarks: true}
+		if meta, ok := ls.Profile.InfoCache[name]; ok {
+			p.Name = meta.Name
+			p.UserName = meta.UserName
+			p.GaiaName = meta.GaiaName
+		}
+		// Count bookmarks
+		var cf chromeFile
+		if err := json.Unmarshal(bmData, &cf); err == nil {
+			p.BookmarkCount = countBookmarks(&cf)
+		}
+		out = append(out, p)
+	}
+	// Sort by Dir name for stable output.
+	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
+	return out, nil
+}
+
+// countBookmarks recursively counts URL entries across all three roots.
+func countBookmarks(cf *chromeFile) int {
+	var count func(n *chromeNode) int
+	count = func(n *chromeNode) int {
+		if n == nil {
+			return 0
+		}
+		if n.Type == "url" {
+			return 1
+		}
+		total := 0
+		for _, c := range n.Children {
+			total += count(c)
+		}
+		return total
+	}
+	return count(cf.Roots.BookmarkBar) + count(cf.Roots.Other) + count(cf.Roots.Synced)
+}
+
+// formatProfileList returns the human-readable enumeration shown in the
+// "profile not found" error.
+func formatProfileList(profiles []chromeProfileInfo) string {
+	if len(profiles) == 0 {
+		return "  (no profiles with a Bookmarks file found)\n"
+	}
+	var b strings.Builder
+	// Compute widths for alignment.
+	var maxDir, maxIdent int
+	for _, p := range profiles {
+		if len(p.Dir) > maxDir {
+			maxDir = len(p.Dir)
+		}
+		ident := formatProfileIdentity(p)
+		if len(ident) > maxIdent {
+			maxIdent = len(ident)
+		}
+	}
+	for _, p := range profiles {
+		ident := formatProfileIdentity(p)
+		fmt.Fprintf(&b, "  %-*s  ·  %-*s  ·  %d bookmarks\n",
+			maxDir, p.Dir,
+			maxIdent, ident,
+			p.BookmarkCount,
+		)
+	}
+	return b.String()
+}
+
+func formatProfileIdentity(p chromeProfileInfo) string {
+	// Prefer the user's display name + email when available.
+	parts := []string{}
+	if p.GaiaName != "" {
+		parts = append(parts, p.GaiaName)
+	} else if p.Name != "" {
+		parts = append(parts, p.Name)
+	}
+	if p.UserName != "" {
+		parts = append(parts, p.UserName)
+	}
+	if len(parts) == 0 {
+		return "(unknown identity)"
+	}
+	return strings.Join(parts, " / ")
 }
