@@ -382,8 +382,8 @@ A tiny `playwright` or `puppeteer` script (deferred to v1.1 if it adds friction)
 - Toast confirmations (Saved / Deleted)
 - "Recently deleted" undo (5-second window, in-memory)
 - `snackpage --version` with build info
-- golangci-lint + GitHub Actions CI
-- Optional Playwright smoke test in CI
+- Fix `make lint` to surface golangci-lint findings instead of silencing them via `||`
+- Optional Playwright smoke test wired into a Makefile target (run locally, not in CI)
 
 ### v2 — distribution & lifecycle
 
@@ -436,7 +436,29 @@ end
 
 **2.4 — README installation matrix.** Clear sections: "macOS via Homebrew", "Linux via Homebrew", "Build from source", each with copy-pasteable steps. Replaces the current "git clone + make install" instruction. ~30 lines of README.
 
-**2.5 — CI on macOS and Linux.** GitHub Actions matrix building + testing on `macos-latest` and `ubuntu-latest`. Catches platform-specific regressions (the Chrome bookmarks path resolver, the systemd unit generator) before they hit users. The lint target (currently silencing golangci-lint findings via `||`) gets fixed up at the same time so CI catches real issues.
+**2.5 — Local cross-platform verification.** No GitHub Actions. Build on macOS (the daily driver), cross-compile to Linux via Go's built-in cross-compilation (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build`), run the test suite + e2e against the Linux binary inside a Docker container (or OrbStack VM, or `colima`, or whatever container runtime is handy). New Makefile targets:
+
+```makefile
+build-linux:                  # cross-compile a Linux binary on macOS
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+	  $(GOFLAGS) -ldflags='$(LDFLAGS)' -o snackpage-linux ./cmd/snackpage
+
+test-linux:                   # run Go tests in a Linux container against the source
+	docker run --rm -v $(CURDIR):/src -w /src \
+	  golang:$(GO_VERSION) go test ./... -race -cover
+
+e2e-linux: build-linux        # run scripts/e2e.sh against the Linux binary in a container
+	docker run --rm -v $(CURDIR):/src -w /src \
+	  debian:stable-slim bash -c './snackpage-linux serve --addr 127.0.0.1:18765 --data-dir /tmp/data --log-level error & \
+	    sleep 1 && curl -fsS http://127.0.0.1:18765/healthz'
+	# (full e2e script will need a Linux-flavored variant; sketch only)
+
+lint:                         # surface golangci-lint findings — no more `||` silencing
+	go vet ./...
+	golangci-lint run ./...
+```
+
+Catches platform-specific regressions (Chrome bookmarks path resolver, future systemd unit generator) before users hit them. No CI runner-minute costs, no workflow YAML, no GitHub-side state. Run `make test-linux` before tagging. If anyone ever wants a real CI matrix, it's a one-day port — but until then, manual local verification is the policy.
 
 **2.6 — homebrew-core upstreaming** *(optional, much later).* Once snackpage is stable and externally tested, submit to homebrew-core so `brew install snackpage` works without the tap prefix. Multi-week review process; only worth it if other people start using snackpage.
 
