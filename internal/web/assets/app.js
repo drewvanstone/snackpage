@@ -20,9 +20,55 @@ async function load() {
 
 function refresh() {
   const q = $q.value.trim();
-  state.view = q === "" ? sortByFrecency(state.bookmarks) : state.bookmarks; // search added in Task 17
+  if (q === "") {
+    state.view = sortByFrecency(state.bookmarks);
+  } else {
+    state.view = fuzzyRank(q, state.bookmarks);
+  }
   if (state.selected >= state.view.length) state.selected = Math.max(0, state.view.length - 1);
+  if (state.view.length > 0 && state.selected < 0) state.selected = 0;
   render();
+}
+
+// Weighted fzf ranking. Falls back to substring match if fzf failed to load.
+function fuzzyRank(q, items) {
+  const F = window.fzf;
+  if (!F) {
+    const ql = q.toLowerCase();
+    return items.filter(b =>
+      b.title.toLowerCase().includes(ql) ||
+      b.url.toLowerCase().includes(ql) ||
+      (b.tags || []).some(t => t.toLowerCase().includes(ql)) ||
+      (b.aliases || []).some(a => a.toLowerCase().includes(ql))
+    );
+  }
+  // fzf-for-js: build a Fzf finder per field, score, sum.
+  const titleFinder = new F.Fzf(items, { selector: i => i.title });
+  const urlFinder = new F.Fzf(items, { selector: i => i.url });
+  const tagsFinder = new F.Fzf(items, { selector: i => (i.tags || []).join(" ") });
+  const aliasFinder = new F.Fzf(items, { selector: i => (i.aliases || []).join(" ") });
+
+  const scoreMap = new Map(); // id -> { score, item }
+  function feed(finder, weight) {
+    const entries = finder.find(q);
+    for (const e of entries) {
+      const cur = scoreMap.get(e.item.id) || { score: 0, item: e.item };
+      cur.score += weight * e.score;
+      scoreMap.set(e.item.id, cur);
+    }
+  }
+  feed(titleFinder, 4);
+  feed(aliasFinder, 3);
+  feed(tagsFinder, 2);
+  feed(urlFinder, 1);
+
+  const now = Date.now();
+  const ranked = [...scoreMap.values()].map(({ score, item }) => ({
+    item,
+    score: score + 0.001 * frecency(item, now),
+  }));
+  ranked.sort((a, z) => z.score - a.score);
+  return ranked.map(r => r.item);
 }
 
 function sortByFrecency(items) {
