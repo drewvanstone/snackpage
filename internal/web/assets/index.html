@@ -2,11 +2,26 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>snackpage</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <p>snackpage placeholder — Task 14 will fill this in</p>
-  <script src="/static/app.js"></script>
+  <main class="picker" id="picker">
+    <div class="picker-title">snackpage</div>
+    <div class="prompt">
+      <span class="glyph">❯</span>
+      <input id="q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+    </div>
+    <ul id="list" class="list" aria-live="polite"></ul>
+    <div class="footer">
+      <span id="count"></span>
+      <span class="hints">↑↓ select · ⏎ open · ⌘N add · ⌘E edit · ⌘D delete · ⎋ clear</span>
+    </div>
+  </main>
+
+  <div id="modal-root"></div>
+
+  <script type="module" src="/static/app.js"></script>
 </body>
 </html>
