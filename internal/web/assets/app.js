@@ -160,12 +160,31 @@ document.addEventListener("keydown", (e) => {
   // Modal handles its own keys; bail when one is open.
   if (document.querySelector(".modal-overlay")) return;
 
+  const isCmdD = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d";
+  if (!isCmdD) clearPendingDelete();
+
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
     e.preventDefault();
     openModal({
       title: "Add bookmark",
       onSave: createBookmark,
     });
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e") {
+    e.preventDefault();
+    const b = state.view[state.selected];
+    if (!b) return;
+    openModal({
+      title: "Edit bookmark",
+      initial: b,
+      onSave: (payload) => updateBookmark(b.id, payload),
+    });
+    return;
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+    e.preventDefault();
+    armOrConfirmDelete();
     return;
   }
 
@@ -313,4 +332,48 @@ async function createBookmark(payload) {
   // Auto-select the newly created bookmark
   const idx = state.view.findIndex(b => b.id === created.id);
   if (idx >= 0) { state.selected = idx; render(); }
+}
+
+async function updateBookmark(id, payload) {
+  const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${r.status}`);
+  }
+  await load();
+}
+
+async function deleteBookmark(id) {
+  const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), { method: "DELETE" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  await load();
+}
+
+// Delete confirmation state — second ⌘D within 2s within the picker.
+let pendingDeleteId = null;
+let pendingDeleteTimer = null;
+
+function clearPendingDelete() {
+  pendingDeleteId = null;
+  if (pendingDeleteTimer) { clearTimeout(pendingDeleteTimer); pendingDeleteTimer = null; }
+  $list.querySelectorAll(".row.deleting").forEach(el => el.classList.remove("deleting"));
+}
+
+function armOrConfirmDelete() {
+  const b = state.view[state.selected];
+  if (!b) return;
+  if (pendingDeleteId === b.id) {
+    clearPendingDelete();
+    deleteBookmark(b.id).catch(err => alert("delete failed: " + err.message));
+    return;
+  }
+  clearPendingDelete();
+  pendingDeleteId = b.id;
+  const row = $list.children[state.selected];
+  if (row) row.classList.add("deleting");
+  pendingDeleteTimer = setTimeout(clearPendingDelete, 2000);
 }
