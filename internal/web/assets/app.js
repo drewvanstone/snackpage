@@ -138,4 +138,69 @@ function render() {
 
 $q.addEventListener("input", refresh);
 
+function move(delta) {
+  if (state.view.length === 0) return;
+  state.selected = (state.selected + delta + state.view.length) % state.view.length;
+  render();
+  // Scroll selected into view
+  const sel = $list.querySelector('[aria-selected="true"]');
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+
+function openSelected(newTab) {
+  const b = state.view[state.selected];
+  if (!b) return;
+  const url = "/go/" + encodeURIComponent(b.id);
+  if (newTab) window.open(url, "_blank");
+  else window.location.href = url;
+}
+
+// Global key handler — runs at capture phase so we can override input behavior.
+document.addEventListener("keydown", (e) => {
+  // Modal handles its own keys; bail when one is open.
+  if (document.querySelector(".modal-overlay")) return;
+
+  const inInput = document.activeElement === $q;
+  const empty = $q.value === "";
+
+  // Navigation: arrows + Ctrl+N/P (always); j/k (only when input is empty)
+  if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
+    e.preventDefault(); move(1); return;
+  }
+  if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
+    e.preventDefault(); move(-1); return;
+  }
+  if ((!inInput || empty) && (e.key === "j")) {
+    if (inInput && empty) { e.preventDefault(); move(1); return; }
+    if (!inInput) { e.preventDefault(); move(1); return; }
+  }
+  if ((!inInput || empty) && (e.key === "k")) {
+    if (inInput && empty) { e.preventDefault(); move(-1); return; }
+    if (!inInput) { e.preventDefault(); move(-1); return; }
+  }
+
+  if (e.key === "Enter") {
+    if ((e.metaKey || e.ctrlKey)) { e.preventDefault(); openSelected(true); return; }
+    e.preventDefault(); openSelected(false); return;
+  }
+  if (e.key === "Escape") {
+    if ($q.value !== "") { $q.value = ""; refresh(); }
+    else $q.blur();
+    return;
+  }
+  if (e.key === "/" && !inInput) {
+    e.preventDefault();
+    $q.focus();
+    return;
+  }
+});
+
+// Click-to-select on rows
+$list.addEventListener("click", (e) => {
+  const li = e.target.closest(".row");
+  if (!li) return;
+  const idx = [...$list.children].indexOf(li);
+  if (idx >= 0) { state.selected = idx; render(); }
+});
+
 load();
