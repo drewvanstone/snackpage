@@ -160,6 +160,15 @@ document.addEventListener("keydown", (e) => {
   // Modal handles its own keys; bail when one is open.
   if (document.querySelector(".modal-overlay")) return;
 
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+    e.preventDefault();
+    openModal({
+      title: "Add bookmark",
+      onSave: createBookmark,
+    });
+    return;
+  }
+
   const inInput = document.activeElement === $q;
   const empty = $q.value === "";
 
@@ -204,3 +213,104 @@ $list.addEventListener("click", (e) => {
 });
 
 load();
+
+const $modalRoot = document.getElementById("modal-root");
+
+function openModal({ title, initial = {}, onSave }) {
+  closeModal(); // ensure single modal
+  $modalRoot.innerHTML = `
+    <div class="modal-overlay" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h2><span>${escapeHTML(title)}</span><span class="esc">⎋ to cancel</span></h2>
+        <div class="field">
+          <label>URL <span style="color:var(--red)">*</span></label>
+          <input id="m-url" type="text" value="${escapeHTML(initial.url || "")}" placeholder="https://…">
+          <div class="hint">required — validated as a URL on submit</div>
+        </div>
+        <div class="field">
+          <label>Title <span style="color:var(--red)">*</span></label>
+          <input id="m-title" type="text" value="${escapeHTML(initial.title || "")}" placeholder="Team Dashboard">
+          <div class="hint">defaults to URL hostname if blank</div>
+        </div>
+        <div class="field">
+          <label>Tags</label>
+          <input id="m-tags" type="text" value="${escapeHTML((initial.tags || []).join(", "))}" placeholder="work, jira">
+          <div class="hint">comma-separated, optional</div>
+        </div>
+        <div class="field">
+          <label>Aliases</label>
+          <input id="m-aliases" type="text" value="${escapeHTML((initial.aliases || []).join(", "))}" placeholder="team board, sprint board">
+          <div class="hint">extra fuzzy-search keywords, not shown in the list</div>
+        </div>
+        <div id="m-error" class="error" style="display:none"></div>
+        <div class="modal-footer">
+          <span>Tab to cycle · ⏎ save · ⎋ cancel</span>
+          <div class="actions">
+            <button id="m-cancel" class="btn">Cancel</button>
+            <button id="m-save" class="btn btn-primary">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const $url = document.getElementById("m-url");
+  const $title = document.getElementById("m-title");
+  const $tags = document.getElementById("m-tags");
+  const $aliases = document.getElementById("m-aliases");
+  const $err = document.getElementById("m-error");
+
+  $url.focus();
+  $url.select();
+
+  const submit = async () => {
+    const url = $url.value.trim();
+    if (!url) { showErr("URL is required"); return; }
+    let parsed;
+    try { parsed = new URL(url); } catch { showErr("URL is not valid"); return; }
+    const titleVal = $title.value.trim() || parsed.hostname;
+    const tags = $tags.value.split(",").map(s => s.trim()).filter(Boolean);
+    const aliases = $aliases.value.split(",").map(s => s.trim()).filter(Boolean);
+    try {
+      await onSave({ url, title: titleVal, tags, aliases });
+      closeModal();
+    } catch (err) {
+      showErr(err.message || "save failed");
+    }
+  };
+
+  document.getElementById("m-save").addEventListener("click", submit);
+  document.getElementById("m-cancel").addEventListener("click", closeModal);
+
+  $modalRoot.querySelector(".modal").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); closeModal(); return; }
+    if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+  });
+
+  function showErr(msg) {
+    $err.textContent = msg;
+    $err.style.display = "block";
+  }
+}
+
+function closeModal() {
+  $modalRoot.innerHTML = "";
+  $q.focus();
+}
+
+async function createBookmark(payload) {
+  const r = await fetch("/api/bookmarks", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    throw new Error(body.error || `HTTP ${r.status}`);
+  }
+  const created = await r.json();
+  await load();
+  // Auto-select the newly created bookmark
+  const idx = state.view.findIndex(b => b.id === created.id);
+  if (idx >= 0) { state.selected = idx; render(); }
+}
