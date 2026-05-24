@@ -190,3 +190,49 @@ func TestDeleteBookmark_NotFound(t *testing.T) {
 		t.Errorf("status = %d; want 404", resp.StatusCode)
 	}
 }
+
+func TestRedirect_BumpsStatsAndRedirects(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	_, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"X","url":"https://example.com/x"}`)
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(body, &created)
+
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Get(ts.URL + "/go/" + created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Errorf("status = %d; want 302", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("Location"); loc != "https://example.com/x" {
+		t.Errorf("Location = %q; want %q", loc, "https://example.com/x")
+	}
+
+	// Verify GET /api/bookmarks now shows visit_count: 1
+	listResp, _ := http.Get(ts.URL + "/api/bookmarks")
+	defer listResp.Body.Close()
+	listBody, _ := io.ReadAll(listResp.Body)
+	if !strings.Contains(string(listBody), `"visit_count":1`) {
+		t.Errorf("expected visit_count=1; got %s", listBody)
+	}
+}
+
+func TestRedirect_NotFound(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, _ := client.Get(ts.URL + "/go/00000000")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d; want 404", resp.StatusCode)
+	}
+}

@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/bookmarks", s.handleCreateBookmark)
 	mux.HandleFunc("PUT /api/bookmarks/{id}", s.handleUpdateBookmark)
 	mux.HandleFunc("DELETE /api/bookmarks/{id}", s.handleDeleteBookmark)
+	mux.HandleFunc("GET /go/{id}", s.handleRedirect)
 	return recoverPanics(s.logger, logRequests(s.logger, mux))
 }
 
