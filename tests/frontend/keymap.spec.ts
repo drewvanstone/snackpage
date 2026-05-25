@@ -190,6 +190,64 @@ test.describe("snackpage picker — keymap and modes", () => {
     expect(focusedId).toBe("q");
   });
 
+  test("Ctrl+D / Ctrl+U scroll half a page in both modes", async ({ page }) => {
+    // Prime list with a multi-row result that exceeds the visible area.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 20
+    );
+
+    // Compute expected half-page step from DOM measurements (matches the
+    // pageScroll() formula in app.js).
+    const halfPage = await page.evaluate(() => {
+      const list = document.getElementById("list");
+      const firstRow = list.querySelector("li");
+      return Math.max(
+        1,
+        Math.floor(list.clientHeight / firstRow.offsetHeight / 2)
+      );
+    });
+    expect(halfPage).toBeGreaterThan(1);
+
+    // Insert mode (input still focused): Ctrl+D moves selection down.
+    await page.keyboard.press("Control+d");
+    let idx = await page.evaluate(() =>
+      [...document.querySelectorAll("#list li")].findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      )
+    );
+    expect(idx).toBe(halfPage);
+
+    // Ctrl+U moves it back.
+    await page.keyboard.press("Control+u");
+    idx = await page.evaluate(() =>
+      [...document.querySelectorAll("#list li")].findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      )
+    );
+    expect(idx).toBe(0);
+
+    // Normal mode: same behavior.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Control+d");
+    idx = await page.evaluate(() =>
+      [...document.querySelectorAll("#list li")].findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      )
+    );
+    expect(idx).toBe(halfPage);
+
+    // Ctrl+D again: selection moves to 2× halfPage (clamped at last row).
+    await page.keyboard.press("Control+d");
+    idx = await page.evaluate(() =>
+      [...document.querySelectorAll("#list li")].findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      )
+    );
+    const total = await page.locator("#list li").count();
+    expect(idx).toBe(Math.min(total - 1, halfPage * 2));
+  });
+
   test("gg jumps to top of list in normal mode", async ({ page }) => {
     // Prime the list with a multi-row result.
     await page.locator("#q").fill("e");

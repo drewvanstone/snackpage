@@ -165,6 +165,22 @@ function move(delta) {
   scrollSelectedIntoView();
 }
 
+// Half-page scroll, vim's Ctrl+D / Ctrl+U. Move selection by half the
+// currently visible row count, clamped at the list edges (no wrap).
+function pageScroll(direction) {
+  if (state.view.length === 0) return;
+  const firstRow = $list.querySelector("li");
+  if (!firstRow) return;
+  const rowH = firstRow.offsetHeight || 1;
+  const halfVisible = Math.max(1, Math.floor($list.clientHeight / rowH / 2));
+  state.selected = Math.max(
+    0,
+    Math.min(state.view.length - 1, state.selected + direction * halfVisible),
+  );
+  render();
+  scrollSelectedIntoView();
+}
+
 function openSelected(newTab) {
   const b = state.view[state.selected];
   if (!b) return;
@@ -321,6 +337,17 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault(); move(-1); return;
   }
 
+  // Vim half-page scroll: Ctrl+D down, Ctrl+U up. Active in both modes
+  // (snacks.nvim-style — the input never sees a literal Ctrl, so there's
+  // no conflict with typing). Inside an input, this overrides the
+  // emacs-style "delete forward / kill to line start" defaults; acceptable
+  // tradeoff for a keyboard-driven picker.
+  if (e.ctrlKey && (e.key === "d" || e.key === "u")) {
+    e.preventDefault();
+    pageScroll(e.key === "d" ? 1 : -1);
+    return;
+  }
+
   // Any other ⌘/Ctrl-modified key falls through so browser shortcuts like
   // ⌘+R reload, ⌘+L address-bar, ⌘+W close still work.
   if (e.metaKey || e.ctrlKey) return;
@@ -465,12 +492,14 @@ function showHelpOverlay() {
             <dt>⏎</dt><dd>open selected</dd>
             <dt>⌘⏎ / Ctrl+⏎</dt><dd>open in new tab</dd>
             <dt>↑ ↓ / Ctrl+N / Ctrl+P</dt><dd>move selection</dd>
+            <dt>Ctrl+D / Ctrl+U</dt><dd>half-page down / up</dd>
           </dl>
         </div>
         <div class="help-section">
           <div class="help-section-title">Normal mode</div>
           <dl class="help-list">
             <dt>j  k</dt><dd>down / up</dd>
+            <dt>Ctrl+D / Ctrl+U</dt><dd>half-page down / up</dd>
             <dt>gg</dt><dd>top of list</dd>
             <dt>G</dt><dd>bottom of list</dd>
             <dt>⏎</dt><dd>open selected</dd>

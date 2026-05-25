@@ -120,6 +120,7 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 | Keys | Context | Action |
 |---|---|---|
 | `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | any | Move selection |
+| `Ctrl+D` / `Ctrl+U` | any | Half-page down / up |
 | `⏎` | any | Open selected (replaces current tab) |
 | `⌘⏎` / `Ctrl+⏎` | any | Open in a new tab |
 | `⎋` | insert | Enter normal mode (preserves query) |
