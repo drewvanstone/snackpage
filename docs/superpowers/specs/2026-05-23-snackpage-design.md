@@ -385,6 +385,52 @@ A tiny `playwright` or `puppeteer` script (deferred to v1.1 if it adds friction)
 - Fix `make lint` to surface golangci-lint findings instead of silencing them via `||`
 - Optional Playwright smoke test wired into a Makefile target (run locally, not in CI)
 
+### v1.4 — vim-chord keymap migration
+
+**Motivation:** ⌘+letter shortcuts (⌘+I add, ⌘+E edit, ⌘+D delete) fight Chrome's hardcoded mappings (⌘+N broke us in v1.0; the rest are interceptable but feel un-vim). Move all snackpage app commands to normal-mode vim chords; keep only the universally-safe modifier shortcuts. Same keymap design will extend to the manage view (v3) and Bubbletea TUI (v3) cleanly.
+
+**Behavior changes** (picker):
+
+- Drop `⌘+I` (add), `⌘+E` (edit), `⌘+D` (delete) entirely.
+- Add normal-mode chords:
+  - `j` / `k` — move selection (kept from v1.2)
+  - `g g` — top of list
+  - `G` — bottom of list
+  - `a` — open Add modal
+  - `e` — open Edit modal on selected row
+  - `d d` — delete selected (chord-based confirmation replaces the v1.2 two-tap ⌘+D arming UX; same protection, more vim-faithful)
+  - `/` — focus filter (kept; also enters insert mode)
+  - `?` — show keymap help overlay (small modal listing all chords)
+- Reserve `<Space>` in normal mode as the **future leader prefix** for v3+ app-extension commands (jump to manage view, theme toggle, reload, etc.).
+- Keep `Enter` (open) and `⌘+Enter` (open in new tab) — universally safe, no Chrome conflict.
+- Insert mode unchanged: typing filters search, `Esc` enters normal.
+
+**Implementation:**
+
+- ~100 LOC change in `internal/web/assets/app.js`: introduce a chord-buffer + 500ms inter-key timeout. Replace the existing `if (e.key === ...)` branches in the normal-mode path with a dispatch table:
+
+  ```javascript
+  const CHORDS_NORMAL = {
+    "j": () => move(1),
+    "k": () => move(-1),
+    "gg": () => moveTo(0),
+    "G": () => moveTo(state.view.length - 1),
+    "a": () => openAddModal(),
+    "e": () => openEditModal(),
+    "dd": () => deleteSelected(),
+    "i": () => $q.focus(),
+    "/": () => $q.focus(),
+    "?": () => showHelpOverlay(),
+  };
+  ```
+
+  with prefix-detection so `g` waits 500ms for the next key (resolves to `gg` if `g` follows, otherwise no-op).
+
+- Action handlers are named functions, not anonymous — this is the seam where v3 keymap customization plugs in.
+- README keymap table replaced; Playwright tests retargeted (`⌘+I` tests become `a` tests, etc.).
+
+**Net result:** zero Chrome modifier collisions for snackpage app commands; vim-faithful end-to-end; the same keymap shape carries to manage view and TUI when those land.
+
 ### v2 — distribution & lifecycle
 
 **Motivation:** "It should be easy to install snackpage and have it running in the background." Today it's `git clone && make install && snackpage serve` in a tmux pane — fine for me, hostile to anyone else. v2 makes it a one-liner on macOS and Linux. **Linux is first-class**, equal priority with macOS. **Windows is explicitly out of scope** (see Forever non-goals below).
@@ -479,6 +525,8 @@ Recommended sequencing: ship 2.7a (just a README sentence) alongside the brew in
 - **Base16-style theming.** Today's Catppuccin Mocha is 20 CSS custom-properties; v3 refactors the CSS to a base16 vocabulary (`--base00..--base0F` plus semantic aliases), ships Catppuccin Mocha + Latte as defaults, allows user themes in `$XDG_CONFIG_HOME/snackpage/themes/`. See `ARCHITECTURE.md` §8.
 - **Layout configuration.** `$XDG_CONFIG_HOME/snackpage/config.json` exposes `layout = "compact" | "detailed"`, `font_size = "sm" | "md" | "lg"`, `theme = "<name>"`. Frontend layout switching is pure CSS; no new render logic.
 - **Bubbletea TUI as a new frontend.** `snackpage tui` subcommand boots a terminal picker reading from the same `store.Store`. Same fuzzy ranking, same modal-editing discipline as the web picker.
+- **Manage view (`/manage`).** Spreadsheet-style table of all bookmarks for bulk editing — important after a Chrome import drops 60+ rows with mediocre auto-tags. Each cell is an `<input>`; save on blur via existing PUT. Filter as first tab-stop. Same vim-modal keymap discipline as the picker: `j`/`k`/`h`/`l` cell nav in normal mode, `Enter`/`i` enters cell, `dd` deletes row, `o`/`O` insert new row, `/` focuses filter. No `⌘+letter` shortcuts. Reuses the v1.4 chord-dispatch layer.
+- **Keyboard customization** — `$XDG_CONFIG_HOME/snackpage/keymap.json` lets users remap any normal-mode chord. Schema maps **action names** (e.g. `add`, `edit`, `delete-row`, `top`, `bottom`, `focus-filter`) to **key sequences** (e.g. `"a"`, `"e"`, `"dd"`, `"gg"`, `"G"`, `"/"`). The v1.4 chord-dispatch table is already structured around named action functions, so wiring in user config is a one-day refactor: load the JSON at frontend boot, merge it over the defaults, build the dispatch table from the merged map.
 
 (`snackpage import chrome` already shipped in v1.3; see git history for that one.)
 

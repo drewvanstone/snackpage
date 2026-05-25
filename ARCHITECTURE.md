@@ -19,7 +19,7 @@ The implication: **changes to the bookmark domain ripple to every frontend, so t
 - **Loopback by default.** Bind to `127.0.0.1`, no auth, no TLS, no CORS. A bookmark service is not a network service.
 - **Files are the API.** `bookmarks.json` is hand-editable, diff-friendly, and git-syncable. Anyone with a text editor can recover from a corrupted state.
 - **Atomic on disk.** Every write is `write-tmp → fsync → rename`. Partial writes don't happen.
-- **Keyboard-driven, modal where it serves the user.** vim-style insert/normal modes in the picker; future TUI follows the same conventions.
+- **Keyboard-driven, modal vim-style.** Insert mode for typing into inputs; normal mode for all commands. Normal-mode commands are vim-vocabulary chords (`a` add, `e` edit, `dd` delete, `gg`/`G` top/bottom). **No `⌘+letter` snackpage shortcuts** — they fight Chrome's hardcoded mappings, feel un-vim, and waste a key space we have no business taking. Reserved modifier shortcuts: `Enter` (open) and `⌘+Enter` (open in new tab) only. Future `<Space>` is the leader prefix for app-extension commands. Same keymap shape applies to picker, manage view, and TUI.
 - **Theming is data.** Today: hardcoded Catppuccin Mocha. Target: base16-style palettes as drop-in files (see §7).
 - **Pure functions where possible.** Frecency scoring, ID generation, atomic write, XDG resolution — all pure or trivially testable.
 
