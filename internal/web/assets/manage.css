@@ -109,9 +109,18 @@ body.manage-body {
   border-color: var(--mauve);
 }
 
-/* Column widths — rough proportions; flex-grow handled by table-layout: auto. */
-.col-title    { width: 22%; }
-.col-url      { width: 38%; }
+/* Unfocused inputs ellipsize so long URLs don't dominate the row. The host
+   stays visible at the left; the tail clips with "…". Focus restores full
+   text with the cursor for normal editing. */
+.manage-table td.cell input:not(:focus) {
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+/* Column widths — title gets the room since it's the more informative field
+   in a bulk-edit context. URL is narrower and relies on ellipsis above. */
+.col-title    { width: 38%; }
+.col-url      { width: 22%; }
 .col-tags     { width: 16%; }
 .col-aliases  { width: 16%; }
 .col-del      { width: 2.5rem; min-width: 2.5rem; }
