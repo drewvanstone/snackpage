@@ -730,6 +730,7 @@ const ACTIONS = {
   "focus-filter":  () => $filter.focus(),
   "undo":          () => undo(),
   "show-help":     () => showHelpOverlay(),
+  "goto-picker":   () => { if (window.location.pathname !== "/") window.location.href = "/"; },
 };
 
 const KEYMAP_NORMAL = {
@@ -748,7 +749,9 @@ const KEYMAP_NORMAL = {
   "u":     "undo",
   "/":     "focus-filter",
   "?":     "show-help",
-  // " ": reserved (future leader prefix) — intentionally unbound
+  // <Space> is the leader prefix — single Space alone is unbound; bound
+  // chords below. More leader chords will land in v3 (theme toggle, etc.).
+  " p":    "goto-picker",   // <Space>p — jump to picker (/)
 };
 
 function dispatchNormalKey(key, event) {
@@ -871,7 +874,7 @@ function showHelpOverlay() {
             <dt>u</dt><dd>undo last add/edit/delete</dd>
             <dt>/</dt><dd>focus filter</dd>
             <dt>?</dt><dd>this help</dd>
-            <dt>&lt;Space&gt;</dt><dd>reserved (future leader prefix)</dd>
+            <dt>&lt;Space&gt;p</dt><dd>jump to picker (/)</dd>
           </dl>
         </div>
         <div class="modal-footer">

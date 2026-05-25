@@ -861,4 +861,17 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
       return !(j.bookmarks || []).some((b) => (b.tags || []).includes(t));
     }, uniqueTag);
   });
+
+  test("<Space>p in normal mode jumps to picker (/)", async ({ page }) => {
+    // Enter normal mode (filter is focused on load).
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".manage-page")).toHaveAttribute("data-mode", "normal");
+
+    // Leader chord: Space then p.
+    await page.keyboard.press("Space");
+    await page.keyboard.press("p");
+
+    await page.waitForURL((url) => url.pathname === "/");
+    expect(new URL(page.url()).pathname).toBe("/");
+  });
 });

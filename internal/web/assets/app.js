@@ -246,6 +246,7 @@ const ACTIONS = {
   },
   "undo":          () => undo(),
   "show-help":     () => showHelpOverlay(),
+  "goto-manage":   () => { if (window.location.pathname !== "/manage") window.location.href = "/manage"; },
 };
 
 // Default keymap (picker, normal mode). Maps key-sequence strings → action
@@ -256,8 +257,9 @@ const ACTIONS = {
 //   * Enter and arrow / Ctrl+N/P navigation are handled by the global
 //     keydown branch above the dispatcher (they're identical in both modes
 //     and shouldn't reset the chord buffer), so they don't appear here.
-//   * <Space> is intentionally NOT bound — reserved as the future leader
-//     prefix for v3+ app-extension commands (manage view, theme toggle…).
+//   * <Space> is the leader prefix — single Space alone is unbound; the
+//     bound chords are " m" (manage). More leader chords will land in v3
+//     (theme toggle, reload, etc.).
 const KEYMAP_NORMAL = {
   "j":   "nav-down",
   "k":   "nav-up",
@@ -270,6 +272,7 @@ const KEYMAP_NORMAL = {
   "u":   "undo",
   "/":   "enter-insert",
   "?":   "show-help",
+  " m":  "goto-manage",   // <Space>m — jump to /manage
 };
 
 function dispatchNormalKey(key, event) {
@@ -519,7 +522,7 @@ function showHelpOverlay() {
             <dt>dd</dt><dd>delete selected</dd>
             <dt>u</dt><dd>undo last add/edit/delete</dd>
             <dt>?</dt><dd>this help</dd>
-            <dt>&lt;Space&gt;</dt><dd>reserved (future leader prefix)</dd>
+            <dt>&lt;Space&gt;m</dt><dd>jump to /manage</dd>
           </dl>
         </div>
         <div class="modal-footer">

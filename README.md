@@ -133,11 +133,12 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 | `d` `d` | normal | Delete selected |
 | `u` | normal | Undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
 | `?` | normal | Show keymap help overlay |
+| `<Space>` `m` | normal | Jump to `/manage` |
 | `Tab` / `Shift+Tab` | modal | Cycle fields |
 | `⏎` | modal | Save |
 | `⎋` | modal | Cancel |
 
-Reserved: `<Space>` in normal mode (future leader prefix for app commands).
+`<Space>` is the leader prefix. Currently only `<Space>m` is bound; more leader chords (theme toggle, reload, etc.) come in v3.
 
 ### Manage view
 
@@ -165,8 +166,9 @@ Normal-mode keymap (Esc out of any cell or the filter to enter normal mode):
 | `u` | undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
 | `/` | focus filter |
 | `?` | help overlay |
+| `<Space>` `p` | jump back to picker (`/`) |
 
-Cross-link: there's a `manage` link in the picker footer and a `← picker` link at the top of the manage view.
+Cross-link: `<Space>m` in the picker jumps to `/manage`; `<Space>p` in the manage view jumps back to `/`. Visible links (`manage` in picker footer, `← picker` in manage header) work too.
 
 ## Storage
 

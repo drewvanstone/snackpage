@@ -576,4 +576,17 @@ test.describe("snackpage picker — keymap and modes", () => {
       return !(j.bookmarks || []).some((b) => (b.tags || []).includes(t));
     }, tag);
   });
+
+  test("<Space>m in normal mode jumps to /manage", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#picker")).toHaveAttribute("data-mode", "normal");
+
+    // Leader chord: Space then m. Two distinct keydowns, within the
+    // CHORD_TIMEOUT_MS=500 window the dispatcher waits between prefix keys.
+    await page.keyboard.press("Space");
+    await page.keyboard.press("m");
+
+    await page.waitForURL("**/manage");
+    expect(page.url()).toMatch(/\/manage$/);
+  });
 });
