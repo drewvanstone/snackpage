@@ -229,16 +229,25 @@ test.describe("snackpage picker — keymap and modes", () => {
     expect(selectedIdx).toBe(0);
   });
 
-  test("G jumps to bottom of list in normal mode", async ({ page }) => {
-    // Prime the list with a multi-row result.
+  test("G jumps to bottom of list in normal mode and scrolls it into view", async ({
+    page,
+  }) => {
+    // Prime the list with a multi-row result that exceeds the list's
+    // max-height (60vh) so a real scroll is required to see the bottom row.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 2
+      () => document.querySelectorAll("#list li").length > 20
     );
     await page.keyboard.press("Escape");
 
     const total = await page.locator("#list li").count();
-    expect(total).toBeGreaterThan(2);
+    expect(total).toBeGreaterThan(20);
+
+    // Before G: list is scrolled to the top.
+    const scrollBefore = await page.evaluate(
+      () => document.getElementById("list").scrollTop
+    );
+    expect(scrollBefore).toBe(0);
 
     // Shift+g → G → nav-bottom.
     await page.keyboard.press("Shift+g");
@@ -250,6 +259,20 @@ test.describe("snackpage picker — keymap and modes", () => {
       );
     });
     expect(selectedIdx).toBe(total - 1);
+
+    // After G: the list must have scrolled down so the bottom row is visible.
+    const scrollAfter = await page.evaluate(
+      () => document.getElementById("list").scrollTop
+    );
+    expect(scrollAfter).toBeGreaterThan(0);
+
+    // And gg should scroll back to the top.
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    const scrollAfterTop = await page.evaluate(
+      () => document.getElementById("list").scrollTop
+    );
+    expect(scrollAfterTop).toBe(0);
   });
 
   test("? opens the help overlay; Esc closes it", async ({ page }) => {

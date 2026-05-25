@@ -153,13 +153,16 @@ function render() {
 
 $q.addEventListener("input", refresh);
 
+function scrollSelectedIntoView() {
+  const sel = $list.querySelector('[aria-selected="true"]');
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+
 function move(delta) {
   if (state.view.length === 0) return;
   state.selected = (state.selected + delta + state.view.length) % state.view.length;
   render();
-  // Scroll selected into view
-  const sel = $list.querySelector('[aria-selected="true"]');
-  if (sel) sel.scrollIntoView({ block: "nearest" });
+  scrollSelectedIntoView();
 }
 
 function openSelected(newTab) {
@@ -191,10 +194,10 @@ const ACTIONS = {
   "nav-down":      () => move(1),
   "nav-up":        () => move(-1),
   "nav-top":       () => {
-    if (state.view.length) { state.selected = 0; render(); }
+    if (state.view.length) { state.selected = 0; render(); scrollSelectedIntoView(); }
   },
   "nav-bottom":    () => {
-    if (state.view.length) { state.selected = state.view.length - 1; render(); }
+    if (state.view.length) { state.selected = state.view.length - 1; render(); scrollSelectedIntoView(); }
   },
   "open":          () => openSelected(false),
   "open-new-tab":  () => openSelected(true),
