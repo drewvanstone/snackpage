@@ -874,4 +874,48 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     await page.waitForURL((url) => url.pathname === "/");
     expect(new URL(page.url()).pathname).toBe("/");
   });
+
+  test("Cmd+click on a URL cell opens it in a new tab and does NOT focus the cell", async ({
+    page,
+    request,
+  }) => {
+    const tag = "cmdclick-" + Date.now();
+    const targetUrl = "https://example.com/cmdclick-target";
+    const create = await request.post("/api/bookmarks", {
+      data: { title: "CmdClick", url: targetUrl, tags: [tag] },
+    });
+    const created = await create.json();
+
+    await page.goto("/manage");
+    await page.waitForSelector(`tr[data-id="${created.id}"]`);
+
+    // Monkey-patch window.open so we can detect the call without spawning a
+    // real tab (and without waiting for example.com to load).
+    await page.evaluate(() => {
+      (window as any).__opened = null;
+      window.open = (url: string, target: string) => {
+        (window as any).__opened = { url, target };
+        return null as any;
+      };
+    });
+
+    const urlCell = page.locator(
+      `tr[data-id="${created.id}"] input[data-field="url"]`
+    );
+    await urlCell.click({ modifiers: ["Meta"] });
+
+    const opened = await page.evaluate(() => (window as any).__opened);
+    expect(opened).not.toBeNull();
+    expect(opened.url).toBe(targetUrl);
+    expect(opened.target).toBe("_blank");
+
+    // Focus should NOT have moved to the URL cell.
+    const focusedField = await page.evaluate(
+      () => (document.activeElement as HTMLInputElement | null)?.dataset?.field ?? ""
+    );
+    expect(focusedField).not.toBe("url");
+
+    // Cleanup
+    await request.delete(`/api/bookmarks/${created.id}`);
+  });
 });

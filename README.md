@@ -151,6 +151,7 @@ Visit `http://localhost:8765/manage` for a spreadsheet-style table of all bookma
 - **Delete:** click `✕` to arm the row (it turns red); click `✕` again within 2 seconds to confirm. Or use `dd` in normal mode — the chord IS the confirmation.
 - **Undo:** `u` in normal mode reverses the last add / edit / delete. The stack lives in this view's memory only; refreshing or hopping to the picker resets it. Restored deletes get a fresh server id (the old one is gone).
 - **Validation:** invalid URLs get a red outline; the cell stays in `.invalid` until you fix it or press `Esc` to revert.
+- **Open URL:** `⌘+click` (Ctrl+click on Linux) on a URL cell opens that bookmark in a new tab, like a regular link. Plain click still focuses the cell for editing.
 
 Normal-mode keymap (Esc out of any cell or the filter to enter normal mode):
 

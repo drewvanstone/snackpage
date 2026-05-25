@@ -105,9 +105,23 @@ function attachRowHandlers(tr) {
     input.addEventListener("focus", onCellFocus);
     input.addEventListener("blur", onCellBlur);
     input.addEventListener("keydown", onCellKeydown);
+    // Cmd/Ctrl + click on a URL cell opens the URL in a new tab — mirrors
+    // browser link-open semantics. Intercept at mousedown so the default
+    // focus-on-click doesn't fire.
+    if (input.dataset.field === "url") {
+      input.addEventListener("mousedown", onUrlMouseDown);
+    }
   });
   const delBtn = tr.querySelector(".del-btn");
   delBtn.addEventListener("click", onDeleteClick);
+}
+
+function onUrlMouseDown(e) {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  const url = e.currentTarget.value.trim();
+  if (!url) return;
+  e.preventDefault();   // suppress the focus that would otherwise follow
+  window.open(url, "_blank", "noopener");
 }
 
 // Re-index visible rows in the DOM order. Call after add/delete/filter.
