@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>snackpage — manage</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/manage.css">
+</head>
+<body class="manage-body">
+  <main class="manage" id="manage">
+    <div class="manage-header">
+      <a href="/" class="cross-link back-link" tabindex="-1">← picker</a>
+      <span class="manage-title">snackpage / manage</span>
+      <input id="filter" type="text" placeholder="filter…" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+      <button id="add-btn" type="button" class="btn btn-primary" tabindex="-1">+ Add</button>
+    </div>
+
+    <div class="manage-table-wrap">
+      <table id="manage-table" class="manage-table">
+        <thead>
+          <tr>
+            <th class="col-title">Title</th>
+            <th class="col-url">URL</th>
+            <th class="col-tags">Tags</th>
+            <th class="col-aliases">Aliases</th>
+            <th class="col-del" aria-label="delete"></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <div class="manage-footer">
+      <span id="row-count"></span>
+      <span class="manage-hints">Tab navigates · ⎋ revert · ⏎ save+next · ⌘⏎ open in new tab</span>
+    </div>
+  </main>
+
+  <script src="/static/vendor/fzf.umd.min.js"></script>
+  <script type="module" src="/static/manage.js"></script>
+</body>
+</html>

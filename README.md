@@ -138,6 +138,21 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 
 Reserved: `<Space>` in normal mode (future leader prefix for app commands).
 
+### Manage view
+
+Visit `http://localhost:8765/manage` for a spreadsheet-style table of all bookmarks. Useful after a Chrome import drops 60+ rows with mediocre auto-tags and you want to clean them up in bulk.
+
+- **Edit:** click any cell or Tab into it. Edits save automatically when you blur the cell (Tab away or click elsewhere). `Enter` saves the cell and jumps to the same column in the next row.
+- **Revert:** press `Esc` inside a cell to restore its pre-edit value without saving.
+- **Filter:** the filter input at the top is the first tab-stop. Fuzzy-matches across title / URL / tags / aliases; non-matching rows are hidden but kept in the DOM so in-flight edits aren't lost.
+- **Add:** click `+ Add` to insert a draft row at the top of the table; fill in title and URL, blur, and the bookmark is created.
+- **Delete:** click `✕` to arm the row (it turns red); click `✕` again within 2 seconds to confirm the delete. Clicking anywhere else cancels the pending delete.
+- **Validation:** invalid URLs get a red outline; the cell stays in `.invalid` until you fix it or press `Esc` to revert.
+
+Cross-link: there's a `manage` link in the picker footer and a `← picker` link at the top of the manage view.
+
+Phase A is browser-default Tab navigation only. Phase B (coming soon) will layer on the vim-modal keymap (`j`/`k`/`h`/`l` cell nav, `gg`/`G`, `dd`, `o`/`O` insert above/below) to match the picker.
+
 ## Storage
 
 ```

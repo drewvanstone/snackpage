@@ -30,6 +30,7 @@ func New(s *store.Store, l *slog.Logger) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /manage", s.handleManage)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(s.assets))))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /api/bookmarks", s.handleListBookmarks)
@@ -49,6 +50,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	data, err := fs.ReadFile(s.assets, "index.html")
 	if err != nil {
 		http.Error(w, "index missing", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(data)
+}
+
+func (s *Server) handleManage(w http.ResponseWriter, _ *http.Request) {
+	data, err := fs.ReadFile(s.assets, "manage.html")
+	if err != nil {
+		http.Error(w, "manage missing", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

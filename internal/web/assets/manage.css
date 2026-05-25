@@ -1,0 +1,167 @@
+/* /manage — spreadsheet view. Reuses Catppuccin palette tokens from style.css.
+   Only manage-specific layout/state classes live here. */
+
+/* Override the centered flex layout in style.css; the manage view stretches
+   to fill the viewport so the table can scroll inside it. */
+body.manage-body {
+  display: block;
+  align-items: initial;
+  justify-content: initial;
+}
+
+.manage {
+  max-width: min(1400px, 96vw);
+  margin: 1.25rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* Top bar: back-to-picker link, view title, filter input, + Add button. */
+.manage-header {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+}
+.manage-title {
+  color: var(--mauve);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.back-link { font-size: 0.78rem; }
+
+#filter {
+  flex: 1;
+  background: var(--base);
+  border: 1px solid var(--surface0);
+  color: var(--text);
+  font: inherit;
+  padding: 0.4rem 0.55rem;
+  border-radius: 5px;
+  outline: none;
+  caret-color: var(--rosewater);
+}
+#filter:focus { border-color: var(--mauve); }
+
+#add-btn { white-space: nowrap; }
+
+/* Table */
+.manage-table-wrap {
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 75vh;
+  background: var(--mantle);
+}
+.manage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: inherit;
+  color: var(--text);
+}
+.manage-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--mantle);
+  color: var(--subtext0);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid var(--surface1);
+  z-index: 1;
+}
+.manage-table tbody tr {
+  border-bottom: 1px solid var(--surface0);
+}
+.manage-table tbody tr:hover {
+  background: rgba(203, 166, 247, 0.06);
+}
+
+.manage-table td {
+  padding: 0;
+  border-right: 1px solid var(--surface0);
+  vertical-align: middle;
+}
+.manage-table td:last-child { border-right: none; }
+
+/* Cell inputs fill their td so the whole cell is the click target. */
+.manage-table td.cell input {
+  width: 100%;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 0.4rem 0.55rem;
+  border-radius: 3px;
+  outline: none;
+  caret-color: var(--rosewater);
+}
+.manage-table td.cell input:focus {
+  background: var(--base);
+  border-color: var(--mauve);
+}
+
+/* Column widths — rough proportions; flex-grow handled by table-layout: auto. */
+.col-title    { width: 22%; }
+.col-url      { width: 38%; }
+.col-tags     { width: 16%; }
+.col-aliases  { width: 16%; }
+.col-del      { width: 2.5rem; min-width: 2.5rem; }
+
+/* Invalid cell — red outline on the input. */
+.manage-table td.cell input.invalid {
+  border-color: var(--red);
+  background: rgba(243, 139, 168, 0.10);
+}
+
+/* Delete button. Two-tap protection: first click adds .deleting, second click deletes. */
+.del-btn {
+  width: 1.8rem;
+  height: 1.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--overlay0);
+  font: inherit;
+  font-size: 0.95rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.del-btn:hover { color: var(--red); border-color: var(--surface1); }
+
+.manage-table tbody tr.deleting {
+  background: rgba(243, 139, 168, 0.18);
+}
+.manage-table tbody tr.deleting .del-btn {
+  color: var(--red);
+  border-color: var(--red);
+  background: rgba(243, 139, 168, 0.10);
+}
+
+/* Footer */
+.manage-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 0.25rem;
+  color: var(--overlay0);
+  font-size: 0.72rem;
+}
+.manage-hints { color: var(--overlay0); }
+
+/* Buttons (reuse style.css .btn / .btn-primary; tweak sizing for the header.) */
+.manage-header .btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+}
