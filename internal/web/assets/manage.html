@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/manage.css">
 </head>
 <body class="manage-body">
-  <main class="manage" id="manage">
+  <main class="manage manage-page" id="manage" data-mode="insert">
     <div class="manage-header">
       <a href="/" class="cross-link back-link" tabindex="-1">← picker</a>
       <span class="manage-title">snackpage / manage</span>
@@ -33,9 +33,11 @@
 
     <div class="manage-footer">
       <span id="row-count"></span>
-      <span class="manage-hints">Tab navigates · ⎋ revert · ⏎ save+next · ⌘⏎ open in new tab</span>
+      <span id="hints" class="manage-hints">Tab nav · ⎋ revert + normal · ⏎ save+down · ⌘⏎ open in new tab · ? help</span>
     </div>
   </main>
+
+  <div id="modal-root"></div>
 
   <script src="/static/vendor/fzf.umd.min.js"></script>
   <script type="module" src="/static/manage.js"></script>

@@ -165,3 +165,20 @@ body.manage-body {
   padding: 0.35rem 0.7rem;
   font-size: 0.78rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Vim-modal cursor (Phase B)
+   --------------------------------------------------------------------------- */
+
+/* In normal mode the active row gets a subtle mauve-tinted background and
+   the active cell gets a mauve outline. The caret is hidden across all cell
+   inputs so typing isn't misread as editing. */
+.manage-page[data-mode="normal"] tr[data-current="true"] {
+  background: rgba(203, 166, 247, 0.12);
+}
+.manage-page[data-mode="normal"] td.cell[data-current="true"] {
+  outline: 2px solid var(--mauve);
+  outline-offset: -2px;
+}
+.manage-page[data-mode="normal"] td.cell input { caret-color: transparent; }
+.manage-page[data-mode="insert"] td.cell input { caret-color: var(--rosewater); }

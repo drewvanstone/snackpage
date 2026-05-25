@@ -300,3 +300,408 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     expect(new URL(page.url()).pathname).toBe("/manage");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase B — vim-modal keymap
+// ---------------------------------------------------------------------------
+
+test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/manage");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#rows tr").length > 0,
+      null,
+      { timeout: 5_000 },
+    );
+    await page.locator("#filter").focus();
+  });
+
+  test("initial mode is insert (filter focused, root data-mode=insert)", async ({ page }) => {
+    const root = page.locator("#manage");
+    await expect(root).toHaveAttribute("data-mode", "insert");
+    const focusedId = await page.evaluate(
+      () => document.activeElement?.id ?? "",
+    );
+    expect(focusedId).toBe("filter");
+  });
+
+  test("Esc inside a cell reverts and enters normal mode", async ({ page }) => {
+    const id = await pickFirstRowId(page);
+    const cell = page.locator(
+      `#rows tr[data-id="${id}"] input[data-field="title"]`,
+    );
+    await cell.focus();
+    const originalValue = await cell.inputValue();
+    await cell.fill("bogus-temp-should-not-stick");
+    await cell.press("Escape");
+
+    await expect(cell).toHaveValue(originalValue);
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+  });
+
+  test("j / k move the row cursor in normal mode", async ({ page }) => {
+    // Drop into normal mode by blurring the filter via Esc.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    const startId = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    await page.keyboard.press("j");
+    const afterJ = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    expect(afterJ).not.toBe(startId);
+
+    await page.keyboard.press("k");
+    const afterK = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    expect(afterK).toBe(startId);
+  });
+
+  test("h / l move the column cursor", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    // Start cursor should be at col 0.
+    let colIdx = await page
+      .locator('#rows tr[data-current="true"] td.cell[data-current="true"]')
+      .getAttribute("data-col-index");
+    expect(colIdx).toBe("0");
+
+    await page.keyboard.press("l");
+    colIdx = await page
+      .locator('#rows tr[data-current="true"] td.cell[data-current="true"]')
+      .getAttribute("data-col-index");
+    expect(colIdx).toBe("1");
+
+    await page.keyboard.press("l");
+    colIdx = await page
+      .locator('#rows tr[data-current="true"] td.cell[data-current="true"]')
+      .getAttribute("data-col-index");
+    expect(colIdx).toBe("2");
+
+    await page.keyboard.press("h");
+    colIdx = await page
+      .locator('#rows tr[data-current="true"] td.cell[data-current="true"]')
+      .getAttribute("data-col-index");
+    expect(colIdx).toBe("1");
+
+    // Clamp left at 0.
+    await page.keyboard.press("h");
+    await page.keyboard.press("h");
+    await page.keyboard.press("h");
+    colIdx = await page
+      .locator('#rows tr[data-current="true"] td.cell[data-current="true"]')
+      .getAttribute("data-col-index");
+    expect(colIdx).toBe("0");
+  });
+
+  test("gg jumps to first row, G to last row", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    const totalRows = await page.locator("#rows tr").count();
+    expect(totalRows).toBeGreaterThan(2);
+
+    // Advance a few rows.
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+
+    // G → last row.
+    await page.keyboard.press("Shift+g");
+    const lastIdx = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
+      const visible = rows.filter((r) => r.style.display !== "none");
+      return visible.findIndex(
+        (r) => r.getAttribute("data-current") === "true",
+      );
+    });
+    const visibleCount = await page.evaluate(
+      () =>
+        [...document.querySelectorAll("#rows tr")].filter(
+          (r) => (r as HTMLElement).style.display !== "none",
+        ).length,
+    );
+    expect(lastIdx).toBe(visibleCount - 1);
+
+    // gg → first row.
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+    const firstIdx = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
+      const visible = rows.filter((r) => r.style.display !== "none");
+      return visible.findIndex(
+        (r) => r.getAttribute("data-current") === "true",
+      );
+    });
+    expect(firstIdx).toBe(0);
+  });
+
+  test("Ctrl+D / Ctrl+U half-page scroll (both modes)", async ({ page }) => {
+    // Need lots of rows so the table actually scrolls.
+    const total = await page.locator("#rows tr").count();
+    expect(total).toBeGreaterThan(20);
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    // Press Ctrl+D → cursor advances by halfPage rows.
+    const halfPage = await page.evaluate(() => {
+      const wrap = document.querySelector(".manage-table-wrap") as HTMLElement;
+      const firstRow = document.querySelector("#rows tr") as HTMLElement;
+      return Math.max(
+        1,
+        Math.floor(wrap.clientHeight / firstRow.offsetHeight / 2),
+      );
+    });
+    expect(halfPage).toBeGreaterThan(1);
+
+    await page.keyboard.press("Control+d");
+    let idx = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
+      const visible = rows.filter((r) => r.style.display !== "none");
+      return visible.findIndex(
+        (r) => r.getAttribute("data-current") === "true",
+      );
+    });
+    expect(idx).toBe(halfPage);
+
+    // Ctrl+U → back up.
+    await page.keyboard.press("Control+u");
+    idx = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
+      const visible = rows.filter((r) => r.style.display !== "none");
+      return visible.findIndex(
+        (r) => r.getAttribute("data-current") === "true",
+      );
+    });
+    expect(idx).toBe(0);
+  });
+
+  test("Enter in normal mode focuses current cell (insert mode)", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    // l so we know we're targeting col 1 (URL).
+    await page.keyboard.press("l");
+    await page.keyboard.press("Enter");
+
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "insert",
+    );
+    const focusedField = await page.evaluate(
+      () => (document.activeElement as HTMLInputElement)?.dataset.field ?? "",
+    );
+    expect(focusedField).toBe("url");
+  });
+
+  test("a focuses current cell with cursor at end", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("a");
+
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "insert",
+    );
+    const result = await page.evaluate(() => {
+      const el = document.activeElement as HTMLInputElement | null;
+      if (!el) return null;
+      return {
+        valueLength: el.value.length,
+        selStart: el.selectionStart,
+        selEnd: el.selectionEnd,
+        field: el.dataset.field,
+      };
+    });
+    expect(result).not.toBeNull();
+    expect(result!.field).toBe("title");
+    expect(result!.selStart).toBe(result!.valueLength);
+    expect(result!.selEnd).toBe(result!.valueLength);
+  });
+
+  test("o inserts a draft row below the current row and focuses title", async ({
+    page,
+  }) => {
+    await page.keyboard.press("Escape");
+    const beforeCount = await page.locator("#rows tr").count();
+
+    // Record the id of the current row so we can verify the new draft sits
+    // immediately after it.
+    const currentId = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    expect(currentId).toBeTruthy();
+
+    await page.keyboard.press("o");
+
+    const afterCount = await page.locator("#rows tr").count();
+    expect(afterCount).toBe(beforeCount + 1);
+
+    // The new draft is the current row, has no data-id, and the next sibling
+    // of the previously-current row.
+    const draftIsCurrent = await page.evaluate((prevId) => {
+      const prev = document.querySelector(`#rows tr[data-id="${prevId}"]`);
+      const draft = prev?.nextElementSibling as HTMLElement | null;
+      return Boolean(
+        draft &&
+          !draft.dataset.id &&
+          draft.getAttribute("data-current") === "true",
+      );
+    }, currentId);
+    expect(draftIsCurrent).toBe(true);
+
+    // Focus is on the draft's title input.
+    const focusedField = await page.evaluate(
+      () => (document.activeElement as HTMLInputElement)?.dataset.field ?? "",
+    );
+    expect(focusedField).toBe("title");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "insert",
+    );
+  });
+
+  test("O inserts a draft row above the current row", async ({ page }) => {
+    await page.keyboard.press("Escape");
+
+    // Move down one so "above" inserts between rows (not at very top).
+    await page.keyboard.press("j");
+    const beforeCount = await page.locator("#rows tr").count();
+    const currentId = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    expect(currentId).toBeTruthy();
+
+    await page.keyboard.press("Shift+o");
+
+    const afterCount = await page.locator("#rows tr").count();
+    expect(afterCount).toBe(beforeCount + 1);
+
+    // The new draft is now the current row and is the previous sibling of
+    // what was current.
+    const draftIsCurrent = await page.evaluate((prevId) => {
+      const prev = document.querySelector(`#rows tr[data-id="${prevId}"]`);
+      const draft = prev?.previousElementSibling as HTMLElement | null;
+      return Boolean(
+        draft &&
+          !draft.dataset.id &&
+          draft.getAttribute("data-current") === "true",
+      );
+    }, currentId);
+    expect(draftIsCurrent).toBe(true);
+
+    const focusedField = await page.evaluate(
+      () => (document.activeElement as HTMLInputElement)?.dataset.field ?? "",
+    );
+    expect(focusedField).toBe("title");
+  });
+
+  test("dd deletes the current row in normal mode", async ({ page }) => {
+    await page.keyboard.press("Escape");
+
+    const before = await fetchBookmarkCount(page);
+    const targetId = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    expect(targetId).toBeTruthy();
+
+    const deletePromise = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/bookmarks/${targetId}`) &&
+        r.request().method() === "DELETE",
+    );
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    const resp = await deletePromise;
+    expect(resp.status()).toBe(204);
+
+    await expect(
+      page.locator(`#rows tr[data-id="${targetId}"]`),
+    ).toHaveCount(0);
+    const after = await fetchBookmarkCount(page);
+    expect(after).toBe(before - 1);
+  });
+
+  test("/ focuses filter and enters insert mode", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    await page.keyboard.press("/");
+
+    const focusedId = await page.evaluate(
+      () => document.activeElement?.id ?? "",
+    );
+    expect(focusedId).toBe("filter");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "insert",
+    );
+  });
+
+  test("? opens help overlay; Esc closes it", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#manage")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    await page.keyboard.press("Shift+/");
+    const overlay = page.locator(".modal-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toContainText("Normal mode");
+    await expect(overlay).toContainText("dd");
+    await expect(overlay).toContainText("gg");
+
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+  });
+
+  test("chord timeout cancels pending sequence", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    // Move a few rows down so we have a known starting row.
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    const beforeId = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+
+    // Press `g` — buffer arms (prefix of "gg"), no action.
+    await page.keyboard.press("g");
+    await page.waitForTimeout(700); // past CHORD_TIMEOUT_MS=500
+
+    // Lone `g` again should NOT fire gg (chord buffer was cleared by timeout).
+    await page.keyboard.press("g");
+    const afterId = await page
+      .locator('#rows tr[data-current="true"]')
+      .getAttribute("data-id");
+    expect(afterId).toBe(beforeId);
+  });
+
+  test("footer hints change with mode", async ({ page }) => {
+    const hints = page.locator("#hints");
+    const insertText = (await hints.textContent()) ?? "";
+    expect(insertText).toContain("Tab nav");
+    expect(insertText).not.toContain("hjkl");
+
+    await page.keyboard.press("Escape");
+    const normalText = (await hints.textContent()) ?? "";
+    expect(normalText).toContain("hjkl");
+    expect(normalText).toContain("dd delete");
+    expect(normalText).toContain("o/O");
+  });
+});
