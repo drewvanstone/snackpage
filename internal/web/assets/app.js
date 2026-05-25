@@ -16,10 +16,11 @@ const $hints = document.getElementById("hints");
 
 // Footer hints text per mode. The visible affordance should match what the
 // keyboard actually does: in insert you press ⎋ to leave to normal; in
-// normal you press i (or a) to return to insert, and j/k navigate.
+// normal you press i/a/ to return to insert, j/k navigates, and the
+// vim chords a/e/dd handle the app commands.
 const HINTS = {
-  insert: "↑↓ select · ⏎ open · ⌘I add · ⌘E edit · ⌘D delete · ⎋ normal mode",
-  normal: "j/k select · ⏎ open · ⌘I add · ⌘E edit · ⌘D delete · i insert mode",
+  insert: "↑↓ select · ⏎ open · ⎋ normal mode · ? help",
+  normal: "j/k select · ⏎ open · a add · e edit · dd delete · i insert mode · ? help",
 };
 
 function setMode(m) {
@@ -169,29 +170,41 @@ function openSelected(newTab) {
   else window.location.href = url;
 }
 
-// Global key handler — runs at capture phase so we can override input behavior.
-document.addEventListener("keydown", (e) => {
-  // Modal handles its own keys; bail when one is open.
-  if (document.querySelector(".modal-overlay")) return;
+// --------------------------------------------------------------------------
+// Vim-chord dispatch (normal mode)
+//
+// Picker commands map to named actions (ACTIONS). The active keymap
+// (KEYMAP_NORMAL) maps key sequences → action names. Single-key entries fire
+// immediately when no other binding shares the prefix; multi-key entries
+// (e.g. "gg", "dd") wait CHORD_TIMEOUT_MS for the next key.
+//
+// The named-action seam is intentional: v3 keymap customization will load
+// $XDG_CONFIG_HOME/snackpage/keymap.json and merge it over KEYMAP_NORMAL
+// before the dispatcher sees it. Action handlers stay the same.
+// --------------------------------------------------------------------------
 
-  const isCmdD = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d";
-  // Standalone modifier keydowns (Meta, Control, Shift, Alt) fire before the
-  // associated letter on physical keyboards and on Playwright; they must not
-  // clear a pending delete or the second ⌘D arrives after the pending state
-  // has been wiped.
-  const isModifier = e.key === "Meta" || e.key === "Control" || e.key === "Shift" || e.key === "Alt";
-  if (!isCmdD && !isModifier) clearPendingDelete();
+const CHORD_TIMEOUT_MS = 500;
+let chordBuffer = "";
+let chordTimer = null;
 
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "i") {
-    e.preventDefault();
-    openModal({
-      title: "Add bookmark",
-      onSave: createBookmark,
-    });
-    return;
-  }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "e") {
-    e.preventDefault();
+const ACTIONS = {
+  "nav-down":      () => move(1),
+  "nav-up":        () => move(-1),
+  "nav-top":       () => {
+    if (state.view.length) { state.selected = 0; render(); }
+  },
+  "nav-bottom":    () => {
+    if (state.view.length) { state.selected = state.view.length - 1; render(); }
+  },
+  "open":          () => openSelected(false),
+  "open-new-tab":  () => openSelected(true),
+  "enter-insert":  () => {
+    $q.focus();
+    const len = $q.value.length;
+    $q.setSelectionRange(len, len);
+  },
+  "add":           () => openModal({ title: "Add bookmark", onSave: createBookmark }),
+  "edit":          () => {
     const b = state.view[state.selected];
     if (!b) return;
     openModal({
@@ -199,54 +212,145 @@ document.addEventListener("keydown", (e) => {
       initial: b,
       onSave: (payload) => updateBookmark(b.id, payload),
     });
+  },
+  "delete":        () => {
+    const b = state.view[state.selected];
+    if (!b) return;
+    deleteBookmark(b.id).catch((err) => alert("delete failed: " + err.message));
+  },
+  "show-help":     () => showHelpOverlay(),
+};
+
+// Default keymap (picker, normal mode). Maps key-sequence strings → action
+// names. Multi-key chords require their prefix not be bound on its own;
+// e.g. "gg" requires "g" not appear as a single-key entry, same for "dd".
+//
+// Notes:
+//   * Enter and arrow / Ctrl+N/P navigation are handled by the global
+//     keydown branch above the dispatcher (they're identical in both modes
+//     and shouldn't reset the chord buffer), so they don't appear here.
+//   * <Space> is intentionally NOT bound — reserved as the future leader
+//     prefix for v3+ app-extension commands (manage view, theme toggle…).
+const KEYMAP_NORMAL = {
+  "j":   "nav-down",
+  "k":   "nav-up",
+  "gg":  "nav-top",
+  "G":   "nav-bottom",
+  "i":   "enter-insert",
+  "a":   "add",
+  "e":   "edit",
+  "dd":  "delete",
+  "/":   "enter-insert",
+  "?":   "show-help",
+};
+
+function dispatchNormalKey(key, event) {
+  // Defensive: some keyboard sources (notably Playwright on `Shift+g`) send
+  // a lowercase `e.key` with `e.shiftKey=true` instead of the shifted
+  // character. If shift is held and we got a lowercase ASCII letter, also
+  // try its uppercase. Same for the standard US Shift+/ → "?" mapping.
+  // Real-browser users already get the shifted character in `e.key` so this
+  // never triggers for them; it just makes the dispatch behave the same
+  // across input event sources.
+  if (event.shiftKey) {
+    if (key === "/") key = "?";
+    else if (key.length === 1 && key >= "a" && key <= "z") key = key.toUpperCase();
+  }
+
+  if (chordTimer) { clearTimeout(chordTimer); chordTimer = null; }
+  const next = chordBuffer + key;
+
+  // Exact match → execute.
+  if (KEYMAP_NORMAL[next]) {
+    event.preventDefault();
+    chordBuffer = "";
+    ACTIONS[KEYMAP_NORMAL[next]](event);
     return;
   }
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+
+  // Prefix match → wait for the next key.
+  const isPrefix = Object.keys(KEYMAP_NORMAL).some(
+    (k) => k.length > next.length && k.startsWith(next)
+  );
+  if (isPrefix) {
+    event.preventDefault();
+    chordBuffer = next;
+    chordTimer = setTimeout(() => { chordBuffer = ""; }, CHORD_TIMEOUT_MS);
+    return;
+  }
+
+  // No match, no prefix. Drop the accumulated buffer and re-try this key
+  // alone — handy when "g" times out then the user presses "j".
+  chordBuffer = "";
+  if (KEYMAP_NORMAL[key]) {
+    event.preventDefault();
+    ACTIONS[KEYMAP_NORMAL[key]](event);
+  }
+  // Otherwise the key falls through (unbound in normal mode).
+}
+
+// Global key handler — runs at capture phase so we can override input behavior.
+document.addEventListener("keydown", (e) => {
+  // Modal handles its own keys; bail when one is open.
+  if (document.querySelector(".modal-overlay")) return;
+
+  // Universally-safe modifier shortcuts — both modes.
+  // ⌘⏎ / Ctrl+⏎ → open selected in new tab.
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
-    armOrConfirmDelete();
+    openSelected(true);
+    return;
+  }
+  // ⏎ (no modifier) → open selected.
+  if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+    e.preventDefault();
+    openSelected(false);
     return;
   }
 
-  const inInput = document.activeElement === $q;
-
-  // Navigation: arrows + Ctrl+N/P (always); j/k (normal mode only)
+  // Arrow keys + Ctrl+N / Ctrl+P navigate in both modes. (Note: e.key on
+  // Ctrl+N/P is "n"/"p" — lower-case — without Shift; we don't need
+  // to check case here.)
   if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
     e.preventDefault(); move(1); return;
   }
   if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
     e.preventDefault(); move(-1); return;
   }
-  if (state.mode === "normal" && e.key === "j") {
-    e.preventDefault(); move(1); return;
-  }
-  if (state.mode === "normal" && e.key === "k") {
-    e.preventDefault(); move(-1); return;
-  }
 
-  // Normal-mode → insert-mode: i / a focus the input, cursor at end of query.
-  if (state.mode === "normal" && (e.key === "i" || e.key === "a")) {
-    e.preventDefault();
-    $q.focus();
-    const len = $q.value.length;
-    $q.setSelectionRange(len, len);
-    return;
-  }
+  // Any other ⌘/Ctrl-modified key falls through so browser shortcuts like
+  // ⌘+R reload, ⌘+L address-bar, ⌘+W close still work.
+  if (e.metaKey || e.ctrlKey) return;
 
-  if (e.key === "Enter") {
-    if ((e.metaKey || e.ctrlKey)) { e.preventDefault(); openSelected(true); return; }
-    e.preventDefault(); openSelected(false); return;
-  }
+  // Esc: insert → normal (blur the input; mode flips via the blur listener).
+  // Normal: no-op (vim-faithful).
   if (e.key === "Escape") {
-    // Insert → normal: blur the input (mode flips via the blur listener).
-    // Normal: no-op (vim-faithful).
     if (state.mode === "insert") $q.blur();
     return;
   }
-  if (e.key === "/" && !inInput) {
+
+  // Normal-mode dispatch. Single-char printable keys, plus Enter (already
+  // handled above) go through the chord layer.
+  if (state.mode === "normal") {
+    // Ignore modifier keydowns themselves (Meta/Shift/etc.) — they aren't
+    // meaningful chord characters and shouldn't reset the buffer.
+    if (e.key === "Shift" || e.key === "Meta" || e.key === "Control" || e.key === "Alt") return;
+    // Only feed single-character keys to the dispatcher. Multi-char keys
+    // (ArrowLeft, F1, Tab, …) are handled by other branches or unbound.
+    if (e.key.length === 1) {
+      dispatchNormalKey(e.key, e);
+    }
+    return;
+  }
+
+  // Insert mode: `/` from outside the input focuses it. (When inside the
+  // input it just types into the query as a character.)
+  if (e.key === "/" && document.activeElement !== $q) {
     e.preventDefault();
     $q.focus();
     return;
   }
+  // Everything else in insert mode falls through to the input element.
 });
 
 // Click-to-select on rows
@@ -343,6 +447,58 @@ function closeModal() {
   $q.focus();
 }
 
+// Keymap help overlay. Reuses #modal-root and the existing Esc-to-close
+// pattern. Read-only — no inputs, no save button.
+function showHelpOverlay() {
+  closeModal();
+  $modalRoot.innerHTML = `
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+      <div class="modal">
+        <h2><span>Keyboard shortcuts</span><span class="esc">⎋ to close</span></h2>
+        <div class="help-section">
+          <div class="help-section-title">Insert mode</div>
+          <dl class="help-list">
+            <dt>⎋</dt><dd>enter normal mode</dd>
+            <dt>⏎</dt><dd>open selected</dd>
+            <dt>⌘⏎ / Ctrl+⏎</dt><dd>open in new tab</dd>
+            <dt>↑ ↓ / Ctrl+N / Ctrl+P</dt><dd>move selection</dd>
+          </dl>
+        </div>
+        <div class="help-section">
+          <div class="help-section-title">Normal mode</div>
+          <dl class="help-list">
+            <dt>j  k</dt><dd>down / up</dd>
+            <dt>gg</dt><dd>top of list</dd>
+            <dt>G</dt><dd>bottom of list</dd>
+            <dt>⏎</dt><dd>open selected</dd>
+            <dt>⌘⏎ / Ctrl+⏎</dt><dd>open in new tab</dd>
+            <dt>i  a  /</dt><dd>enter insert mode</dd>
+            <dt>a</dt><dd>add bookmark</dd>
+            <dt>e</dt><dd>edit selected</dd>
+            <dt>dd</dt><dd>delete selected</dd>
+            <dt>?</dt><dd>this help</dd>
+            <dt>&lt;Space&gt;</dt><dd>reserved (future leader prefix)</dd>
+          </dl>
+        </div>
+        <div class="modal-footer">
+          <span>⎋ close</span>
+          <div class="actions">
+            <button id="m-close" class="btn btn-primary">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("m-close").addEventListener("click", closeModal);
+  $modalRoot.querySelector(".modal").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); closeModal(); return; }
+  });
+  // Focus the close button so Esc-listener picks up keystrokes without a
+  // text input stealing them.
+  document.getElementById("m-close").focus();
+}
+
 async function createBookmark(payload) {
   const r = await fetch("/api/bookmarks", {
     method: "POST",
@@ -377,29 +533,4 @@ async function deleteBookmark(id) {
   const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), { method: "DELETE" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   await load();
-}
-
-// Delete confirmation state — second ⌘D within 2s within the picker.
-let pendingDeleteId = null;
-let pendingDeleteTimer = null;
-
-function clearPendingDelete() {
-  pendingDeleteId = null;
-  if (pendingDeleteTimer) { clearTimeout(pendingDeleteTimer); pendingDeleteTimer = null; }
-  $list.querySelectorAll(".row.deleting").forEach(el => el.classList.remove("deleting"));
-}
-
-function armOrConfirmDelete() {
-  const b = state.view[state.selected];
-  if (!b) return;
-  if (pendingDeleteId === b.id) {
-    clearPendingDelete();
-    deleteBookmark(b.id).catch(err => alert("delete failed: " + err.message));
-    return;
-  }
-  clearPendingDelete();
-  pendingDeleteId = b.id;
-  const row = $list.children[state.selected];
-  if (row) row.classList.add("deleting");
-  pendingDeleteTimer = setTimeout(clearPendingDelete, 2000);
 }

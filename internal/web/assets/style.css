@@ -194,3 +194,26 @@ body {
   color: var(--base);
   font-weight: 600;
 }
+
+/* Help overlay — reuses .modal-overlay/.modal but renders <dl> lists of
+   key bindings instead of form fields. */
+.help-section { margin-bottom: 0.9rem; }
+.help-section-title {
+  color: var(--mauve);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35rem;
+}
+.help-list {
+  display: grid;
+  grid-template-columns: 11rem 1fr;
+  row-gap: 0.18rem;
+  column-gap: 0.8rem;
+}
+.help-list dt {
+  color: var(--peach);
+  font-weight: 600;
+  font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+.help-list dd { color: var(--subtext0); }

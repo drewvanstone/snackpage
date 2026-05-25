@@ -8,6 +8,14 @@ function parseTotal(text: string | null | undefined): number {
   return m ? parseInt(m[1], 10) : NaN;
 }
 
+// Open the Add modal via the v1.4 chord: Esc → normal → a.
+async function openAddModal(page) {
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#picker")).toHaveAttribute("data-mode", "normal");
+  await page.keyboard.press("a");
+  await expect(page.locator(".modal-overlay")).toBeVisible();
+}
+
 test.describe("snackpage picker — modal flows", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
@@ -21,9 +29,10 @@ test.describe("snackpage picker — modal flows", () => {
     await page.locator("#q").focus();
   });
 
-  test("Cmd+I opens Add modal with URL field focused", async ({ page }) => {
-    await page.keyboard.press("Meta+i");
-    await expect(page.locator(".modal-overlay")).toBeVisible();
+  test("'a' in normal mode opens Add modal with URL field focused", async ({
+    page,
+  }) => {
+    await openAddModal(page);
     const focusedId = await page.evaluate(
       () => document.activeElement?.id ?? ""
     );
@@ -32,8 +41,7 @@ test.describe("snackpage picker — modal flows", () => {
 
   test("Esc inside modal cancels (no list change)", async ({ page }) => {
     const beforeCount = await page.locator("#list li").count();
-    await page.keyboard.press("Meta+i");
-    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await openAddModal(page);
     await page.keyboard.press("Escape");
     await expect(page.locator(".modal-overlay")).toHaveCount(0);
     const afterCount = await page.locator("#list li").count();
@@ -44,8 +52,7 @@ test.describe("snackpage picker — modal flows", () => {
     // Capture the bookmarks-loaded total before the add. Empty input renders
     // 0 rows so we read it from the right side of "0 / N" in the count text.
     const before = parseTotal(await page.locator("#count").textContent());
-    await page.keyboard.press("Meta+i");
-    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await openAddModal(page);
     await page.locator("#m-url").fill("https://example.test/new-bookmark");
     await page.locator("#m-title").fill("Example Test Bookmark");
     await page.keyboard.press("Enter");
@@ -66,8 +73,7 @@ test.describe("snackpage picker — modal flows", () => {
 
   test("blank title defaults to URL hostname on submit", async ({ page }) => {
     const before = parseTotal(await page.locator("#count").textContent());
-    await page.keyboard.press("Meta+i");
-    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await openAddModal(page);
     await page.locator("#m-url").fill("https://hostname-default.example/path");
     // leave title blank
     await page.locator("#m-title").fill("");
@@ -86,8 +92,7 @@ test.describe("snackpage picker — modal flows", () => {
   });
 
   test("invalid URL shows inline error, modal stays open", async ({ page }) => {
-    await page.keyboard.press("Meta+i");
-    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await openAddModal(page);
     await page.locator("#m-url").fill("not a url");
     await page.keyboard.press("Enter");
     // Modal stays
@@ -99,7 +104,30 @@ test.describe("snackpage picker — modal flows", () => {
     expect(errText.toLowerCase()).toContain("url");
   });
 
-  test("Cmd+D arms delete (red row); second Cmd+D within 2s deletes", async ({
+  test("'e' in normal mode opens Edit modal pre-filled from the selected row", async ({
+    page,
+  }) => {
+    // Reveal at least one row.
+    await page.locator("#q").fill("github");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 0
+    );
+    const expectedTitle = await page
+      .locator('#list li[aria-selected="true"] .title')
+      .textContent();
+    expect(expectedTitle).toBeTruthy();
+
+    // Esc → e → Edit modal should open with the title field pre-populated.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("e");
+    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await expect(page.locator(".modal h2 span").first()).toHaveText(
+      "Edit bookmark"
+    );
+    await expect(page.locator("#m-title")).toHaveValue(expectedTitle!);
+  });
+
+  test("'dd' chord in normal mode deletes the selected row", async ({
     page,
   }) => {
     // Need a selected row to delete — type to reveal one.
@@ -112,23 +140,25 @@ test.describe("snackpage picker — modal flows", () => {
       .locator('#list li[aria-selected="true"]')
       .getAttribute("data-id");
     expect(id).toBeTruthy();
-    const row = page.locator(`#list li[data-id="${id}"]`);
 
-    // First Cmd+D: arm delete. Check the class is applied synchronously.
-    await page.keyboard.press("Meta+d");
-    const armed = await row.evaluate((el) => el.classList.contains("deleting"));
-    expect(armed).toBe(true);
-
-    // Wait for the DELETE response before checking the list.
-    const deletePromise = page.waitForResponse(
-      (r) => r.url().includes(`/api/bookmarks/${id}`) && r.request().method() === "DELETE"
+    // Drop into normal mode and fire `d` `d` as a chord.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#picker")).toHaveAttribute(
+      "data-mode",
+      "normal"
     );
-    // Second Cmd+D: confirm delete
-    await page.keyboard.press("Meta+d");
+
+    const deletePromise = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/api/bookmarks/${id}`) &&
+        r.request().method() === "DELETE"
+    );
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
     const delResp = await deletePromise;
     expect(delResp.status()).toBe(204);
 
-    // Row gone, list count decreased
+    // Row gone, list count decreased.
     await expect(page.locator(`#list li[data-id="${id}"]`)).toHaveCount(0);
     await expect(page.locator("#list li")).toHaveCount(beforeCount - 1);
   });

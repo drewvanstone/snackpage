@@ -109,26 +109,33 @@ Install [New Tab Override](https://addons.mozilla.org/firefox/addon/new-tab-over
 snackpage is a vim-style modal editor:
 
 - **Insert** (default on page load): typing filters the list, search input is focused, prompt glyph is yellow.
-- **Normal** (after `Esc`): input blurred but query preserved, `j`/`k` navigates, prompt glyph is mauve.
+- **Normal** (after `Esc`): input blurred but query preserved, vim chords navigate and command, prompt glyph is mauve.
 
 Toggle with `Esc` (insert → normal) and `i` / `a` / `/` (normal → insert).
 
 The list starts empty — type to filter. Backspacing back to empty hides the list again. snackpage is a launcher, not a bookmark browser; the first keystroke is the point.
 
-| Keys | Action |
-|---|---|
-| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | Move selection |
-| `j` / `k` | Move selection (Normal mode only) |
-| `⏎` | Open selected (replaces current tab) |
-| `⌘⏎` / `Ctrl+⏎` | Open in a new tab |
-| `⌘I` | Add bookmark |
-| `⌘E` | Edit selected bookmark |
-| `⌘D` | Delete selected — second `⌘D` within 2s confirms |
-| `⎋` | Insert → Normal mode (preserves query). Normal → no-op. |
-| `i` / `a` / `/` | Normal → Insert mode (focuses input, cursor at end). |
-| `Tab` / `Shift+Tab` (in modal) | Cycle fields |
-| `⏎` (in modal) | Save |
-| `⎋` (in modal) | Cancel |
+### Keyboard shortcuts
+
+| Keys | Context | Action |
+|---|---|---|
+| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | any | Move selection |
+| `⏎` | any | Open selected (replaces current tab) |
+| `⌘⏎` / `Ctrl+⏎` | any | Open in a new tab |
+| `⎋` | insert | Enter normal mode (preserves query) |
+| `i` / `a` / `/` | normal | Enter insert mode |
+| `j` / `k` | normal | Move selection |
+| `g` `g` | normal | Top of list |
+| `G` | normal | Bottom of list |
+| `a` | normal | Add bookmark |
+| `e` | normal | Edit selected |
+| `d` `d` | normal | Delete selected |
+| `?` | normal | Show keymap help overlay |
+| `Tab` / `Shift+Tab` | modal | Cycle fields |
+| `⏎` | modal | Save |
+| `⎋` | modal | Cancel |
+
+Reserved: `<Space>` in normal mode (future leader prefix for app commands).
 
 ## Storage
 

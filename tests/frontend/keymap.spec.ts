@@ -29,7 +29,9 @@ test.describe("snackpage picker — keymap and modes", () => {
     await expect(picker).toHaveAttribute("data-mode", "insert");
     await page.keyboard.press("Escape");
     await expect(picker).toHaveAttribute("data-mode", "normal");
-    await page.keyboard.press("a");
+    // `a` now opens the Add modal — exercise `/` instead (also a "back to
+    // insert" binding) so this test stays scoped to mode-transition behavior.
+    await page.keyboard.press("/");
     await expect(picker).toHaveAttribute("data-mode", "insert");
   });
 
@@ -52,17 +54,21 @@ test.describe("snackpage picker — keymap and modes", () => {
   test("footer hints change with mode", async ({ page }) => {
     const hints = page.locator("#hints");
 
-    // Insert mode: should mention "⎋ normal"
+    // Insert mode: should mention "⎋ normal" and the `?` help affordance
     const insertText = (await hints.textContent()) ?? "";
     expect(insertText).toContain("⎋ normal");
+    expect(insertText).toContain("?");
     expect(insertText).not.toContain("j/k");
 
     await page.keyboard.press("Escape");
 
-    // Normal mode: should mention "i insert" and "j/k"
+    // Normal mode: should mention "i insert", j/k, and the new chord vocabulary
     const normalText = (await hints.textContent()) ?? "";
     expect(normalText).toContain("i insert");
     expect(normalText).toContain("j/k");
+    expect(normalText).toContain("a add");
+    expect(normalText).toContain("e edit");
+    expect(normalText).toContain("dd delete");
     expect(normalText).not.toContain("⎋ normal");
   });
 
@@ -182,6 +188,120 @@ test.describe("snackpage picker — keymap and modes", () => {
       () => document.activeElement?.id ?? ""
     );
     expect(focusedId).toBe("q");
+  });
+
+  test("gg jumps to top of list in normal mode", async ({ page }) => {
+    // Prime the list with a multi-row result.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 2
+    );
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#picker")).toHaveAttribute(
+      "data-mode",
+      "normal"
+    );
+
+    // Advance the selection a few rows so gg has somewhere to come back from.
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+
+    // Confirm we're not on row 0
+    let selectedIdx = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#list li")];
+      return items.findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      );
+    });
+    expect(selectedIdx).toBeGreaterThan(0);
+
+    // Two quick g presses → chord → nav-top.
+    await page.keyboard.press("g");
+    await page.keyboard.press("g");
+
+    selectedIdx = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#list li")];
+      return items.findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      );
+    });
+    expect(selectedIdx).toBe(0);
+  });
+
+  test("G jumps to bottom of list in normal mode", async ({ page }) => {
+    // Prime the list with a multi-row result.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 2
+    );
+    await page.keyboard.press("Escape");
+
+    const total = await page.locator("#list li").count();
+    expect(total).toBeGreaterThan(2);
+
+    // Shift+g → G → nav-bottom.
+    await page.keyboard.press("Shift+g");
+
+    const selectedIdx = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#list li")];
+      return items.findIndex(
+        (el) => el.getAttribute("aria-selected") === "true"
+      );
+    });
+    expect(selectedIdx).toBe(total - 1);
+  });
+
+  test("? opens the help overlay; Esc closes it", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#picker")).toHaveAttribute(
+      "data-mode",
+      "normal"
+    );
+    // `?` is Shift+/
+    await page.keyboard.press("Shift+/");
+    const overlay = page.locator(".modal-overlay");
+    await expect(overlay).toBeVisible();
+    await expect(overlay).toContainText("Keyboard shortcuts");
+    // And the help content should mention the new chords.
+    await expect(overlay).toContainText("dd");
+    await expect(overlay).toContainText("gg");
+
+    // Esc closes.
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+  });
+
+  test("chord timeout cancels pending sequence", async ({ page }) => {
+    // Prime the list with multiple rows.
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 1
+    );
+    await page.keyboard.press("Escape");
+
+    // Move selection a few rows down so we have an unambiguous starting point.
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    const beforeId = await page
+      .locator('#list li[aria-selected="true"]')
+      .getAttribute("data-id");
+
+    // Type "g" — this is a prefix (for "gg"), so the buffer arms but no
+    // action runs.
+    await page.keyboard.press("g");
+
+    // Wait past the 500ms chord timeout so the buffer drops.
+    await page.waitForTimeout(700);
+
+    // Now type "g" again. With no pending buffer, a lone "g" has no exact
+    // match (only "gg" is bound), and it IS a prefix again — so it should
+    // re-arm but NOT trigger nav-top. Selection should not have changed.
+    await page.keyboard.press("g");
+    const afterId = await page
+      .locator('#list li[aria-selected="true"]')
+      .getAttribute("data-id");
+    expect(afterId).toBe(beforeId);
   });
 
   test("search filters by title", async ({ page }) => {
