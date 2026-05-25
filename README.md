@@ -174,12 +174,36 @@ Cross-link: `<Space>m` in the picker jumps to `/manage`; `<Space>p` in the manag
 ## Storage
 
 ```
-$XDG_DATA_HOME/snackpage/
-├── bookmarks.json   # canonical, hand-editable, safe to back up via git
-└── state.json       # visit counts and last-visit timestamps (churns; don't git)
+$XDG_DATA_HOME/snackpage/                     # default: ~/.local/share/snackpage/
+├── bookmarks.json   # canonical, hand-editable, version-headered, diff-friendly
+└── state.json       # visit counts and last-visit timestamps (churns rapidly)
 ```
 
-To back up: copy `bookmarks.json` anywhere. To restore: drop it back in place.
+`bookmarks.json` is the only file you care about for portability. `state.json` is derivable (visit counts re-accumulate as you use snackpage) so backing it up is optional.
+
+### Backup & restore
+
+The on-disk format is plain JSON — back up however you back up dotfiles.
+
+**Manual copy:**
+
+```bash
+cp ~/.local/share/snackpage/bookmarks.json ~/backups/snackpage-$(date +%F).json
+```
+
+**Tracked in git** (the most idiomatic approach for a small JSON file):
+
+```bash
+cd ~/.local/share/snackpage
+git init && git add bookmarks.json && git commit -m "initial"
+# add a remote (private repo recommended) and push
+```
+
+`bookmarks.json` is written atomically (`write-tmp → fsync → rename`) and indented for readable diffs, so each commit shows exactly what changed since the last one.
+
+**Continuous sync across workstations:** symlink the data dir into Syncthing / iCloud / Dropbox, OR keep the git-tracked dir and pull from a private remote. Both work; the git approach gives you history for free.
+
+To **restore** on a new machine: drop `bookmarks.json` into `~/.local/share/snackpage/` before launching snackpage. The daemon picks it up on next start. `state.json` is regenerated automatically as you use the picker.
 
 ## Development
 

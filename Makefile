@@ -14,8 +14,11 @@ DEV_ENV  := XDG_DATA_HOME=$(CURDIR)/$(DEV_DIR)
 
 all: build
 
+# CGO_ENABLED=0 produces a fully statically-linked binary — trivially
+# portable across machines, no libc surprises, easier to package for
+# distribution (Homebrew, container images, etc.).
 build:
-	go build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BIN) ./cmd/snackpage
+	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags='$(LDFLAGS)' -o $(BIN) ./cmd/snackpage
 
 test:
 	go test ./... -race -cover
