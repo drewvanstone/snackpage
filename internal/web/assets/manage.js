@@ -16,6 +16,12 @@ const state = {
   mode: "insert",           // "insert" | "normal"
   normalRow: 0,             // index into the currently visible row set
   normalCol: 0,             // 0..MAX_COL
+  // In-memory undo stack — same shape as the picker's. Per-view; refreshing
+  // /manage or hopping to the picker clears it.
+  //   { kind: "add",    id }
+  //   { kind: "edit",   id, prev: {title,url,tags,aliases} }
+  //   { kind: "delete", prev: {title,url,tags,aliases} }
+  undoStack: [],
 };
 
 const $managePage = document.getElementById("manage");
@@ -227,7 +233,8 @@ async function deleteRow(tr) {
   // Clear any in-flight two-tap state — chord IS the confirmation.
   clearPendingDelete();
 
-  // Draft row (no id): just remove from DOM.
+  // Draft row (no id): just remove from DOM. Nothing was POSTed, so no undo
+  // entry — the server state never changed.
   if (!tr.dataset.id) {
     tr.remove();
     refreshRowIndices();
@@ -236,18 +243,31 @@ async function deleteRow(tr) {
     return;
   }
 
+  // Snapshot the bookmark BEFORE the DELETE so undo can re-POST it.
+  const id = tr.dataset.id;
+  const before = state.bookmarks.find((b) => b.id === id);
+  const prev = before
+    ? {
+        title: before.title,
+        url: before.url,
+        tags: [...(before.tags || [])],
+        aliases: [...(before.aliases || [])],
+      }
+    : null;
+
   try {
     const r = await fetch(
-      "/api/bookmarks/" + encodeURIComponent(tr.dataset.id),
+      "/api/bookmarks/" + encodeURIComponent(id),
       { method: "DELETE" },
     );
     if (!r.ok && r.status !== 404) return;
     // Mirror the in-memory bookmarks list too.
-    state.bookmarks = state.bookmarks.filter((b) => b.id !== tr.dataset.id);
+    state.bookmarks = state.bookmarks.filter((b) => b.id !== id);
     tr.remove();
     refreshRowIndices();
     updateCount();
     renderCursor();
+    if (prev) state.undoStack.push({ kind: "delete", prev });
   } catch {
     /* leave row alone on network failure */
   }
@@ -455,6 +475,10 @@ async function onCellBlur(e) {
       tr.querySelectorAll("input").forEach((i) => {
         i.dataset.original = i.value;
       });
+      // Successful POST → undo entry. Drafts that never POST (user added a
+      // row and ✕'d it before any blur) don't reach this branch, so they're
+      // correctly excluded from the stack.
+      state.undoStack.push({ kind: "add", id: created.id });
     } catch {
       input.classList.add("invalid");
     }
@@ -463,9 +487,21 @@ async function onCellBlur(e) {
   }
 
   // Existing row: PUT.
+  // Snapshot the FULL pre-edit bookmark BEFORE sending. Undo just re-PUTs the
+  // whole snapshot — cell-level granularity isn't needed.
+  const id = tr.dataset.id;
+  const beforeBM = state.bookmarks.find((b) => b.id === id);
+  const prev = beforeBM
+    ? {
+        title: beforeBM.title,
+        url: beforeBM.url,
+        tags: [...(beforeBM.tags || [])],
+        aliases: [...(beforeBM.aliases || [])],
+      }
+    : null;
   try {
     const r = await fetch(
-      "/api/bookmarks/" + encodeURIComponent(tr.dataset.id),
+      "/api/bookmarks/" + encodeURIComponent(id),
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -474,7 +510,7 @@ async function onCellBlur(e) {
     );
     if (!r.ok) {
       // Server rejected — restore the cell to its pre-edit value and mark
-      // .invalid so the user sees the failure.
+      // .invalid so the user sees the failure. No undo entry pushed.
       input.classList.add("invalid");
       revertCell(input);
       maybeEnterNormal();
@@ -483,10 +519,11 @@ async function onCellBlur(e) {
     // Success — make this the new "original" for future revert behavior.
     input.dataset.original = newVal;
     // Mirror to in-memory list.
-    const idx = state.bookmarks.findIndex((b) => b.id === tr.dataset.id);
+    const idx = state.bookmarks.findIndex((b) => b.id === id);
     if (idx >= 0) {
       state.bookmarks[idx] = { ...state.bookmarks[idx], ...payload };
     }
+    if (prev) state.undoStack.push({ kind: "edit", id, prev });
   } catch {
     input.classList.add("invalid");
   }
@@ -691,6 +728,7 @@ const ACTIONS = {
   "insert-below":  () => insertDraftRow("below"),
   "insert-above":  () => insertDraftRow("above"),
   "focus-filter":  () => $filter.focus(),
+  "undo":          () => undo(),
   "show-help":     () => showHelpOverlay(),
 };
 
@@ -707,6 +745,7 @@ const KEYMAP_NORMAL = {
   "o":     "insert-below",
   "O":     "insert-above",
   "dd":    "delete-row",
+  "u":     "undo",
   "/":     "focus-filter",
   "?":     "show-help",
   // " ": reserved (future leader prefix) — intentionally unbound
@@ -829,6 +868,7 @@ function showHelpOverlay() {
             <dt>a</dt><dd>edit, cursor at end</dd>
             <dt>o / O</dt><dd>new row below / above</dd>
             <dt>dd</dt><dd>delete current row</dd>
+            <dt>u</dt><dd>undo last add/edit/delete</dd>
             <dt>/</dt><dd>focus filter</dd>
             <dt>?</dt><dd>this help</dd>
             <dt>&lt;Space&gt;</dt><dd>reserved (future leader prefix)</dd>
@@ -854,6 +894,44 @@ function closeModal() {
   $modalRoot.innerHTML = "";
   // After closing, leave focus on the page body so we stay in normal mode.
   // (Don't auto-focus the filter — picker's flow is different.)
+}
+
+// ---------------------------------------------------------------------------
+// Undo (vim `u` in normal mode)
+//
+// One entry per `u` press. Silent — the reappearing / disappearing /
+// reverting row IS the feedback. On failure (e.g. user over-undid into a
+// deleted-then-restored bookmark whose id is stale), surface and stop;
+// don't auto-recover.
+// ---------------------------------------------------------------------------
+async function undo() {
+  if (state.undoStack.length === 0) return; // silent no-op
+  const entry = state.undoStack.pop();
+  try {
+    if (entry.kind === "delete") {
+      const r = await fetch("/api/bookmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(entry.prev),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } else if (entry.kind === "edit") {
+      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(entry.prev),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } else if (entry.kind === "add") {
+      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+        method: "DELETE",
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    }
+    await load();
+  } catch (err) {
+    alert("undo failed: " + err.message);
+  }
 }
 
 // ---------------------------------------------------------------------------

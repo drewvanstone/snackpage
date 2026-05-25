@@ -6,6 +6,13 @@ const state = {
   view: [],        // filtered + sorted subset rendered to DOM
   selected: 0,     // index into view
   mode: "insert",  // "insert" | "normal" — vim-style modal editor mode
+  // In-memory undo stack. One entry per successful add / edit / delete.
+  // Per-view: refreshing the page or switching to /manage clears it.
+  // Entry shapes:
+  //   { kind: "add",    id }                              — undo POSTed bookmark
+  //   { kind: "edit",   id, prev: {title,url,tags,aliases} } — restore pre-edit
+  //   { kind: "delete", prev: {title,url,tags,aliases} }   — re-POST (NEW id)
+  undoStack: [],
 };
 
 const $q = document.getElementById("q");
@@ -237,6 +244,7 @@ const ACTIONS = {
     if (!b) return;
     deleteBookmark(b.id).catch((err) => alert("delete failed: " + err.message));
   },
+  "undo":          () => undo(),
   "show-help":     () => showHelpOverlay(),
 };
 
@@ -259,6 +267,7 @@ const KEYMAP_NORMAL = {
   "a":   "add",
   "e":   "edit",
   "dd":  "delete",
+  "u":   "undo",
   "/":   "enter-insert",
   "?":   "show-help",
 };
@@ -508,6 +517,7 @@ function showHelpOverlay() {
             <dt>a</dt><dd>add bookmark</dd>
             <dt>e</dt><dd>edit selected</dd>
             <dt>dd</dt><dd>delete selected</dd>
+            <dt>u</dt><dd>undo last add/edit/delete</dd>
             <dt>?</dt><dd>this help</dd>
             <dt>&lt;Space&gt;</dt><dd>reserved (future leader prefix)</dd>
           </dl>
@@ -542,6 +552,8 @@ async function createBookmark(payload) {
     throw new Error(body.error || `HTTP ${r.status}`);
   }
   const created = await r.json();
+  // Push undo entry only on success (after we know the server accepted).
+  state.undoStack.push({ kind: "add", id: created.id });
   await load();
   // Auto-select the newly created bookmark
   const idx = state.view.findIndex(b => b.id === created.id);
@@ -549,6 +561,17 @@ async function createBookmark(payload) {
 }
 
 async function updateBookmark(id, payload) {
+  // Snapshot the full pre-edit bookmark BEFORE the PUT. Undo just re-PUTs the
+  // entire snapshot — cell-level granularity isn't needed.
+  const before = state.bookmarks.find((b) => b.id === id);
+  const prev = before
+    ? {
+        title: before.title,
+        url: before.url,
+        tags: [...(before.tags || [])],
+        aliases: [...(before.aliases || [])],
+      }
+    : null;
   const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), {
     method: "PUT",
     headers: { "content-type": "application/json" },
@@ -558,11 +581,59 @@ async function updateBookmark(id, payload) {
     const body = await r.json().catch(() => ({}));
     throw new Error(body.error || `HTTP ${r.status}`);
   }
+  if (prev) state.undoStack.push({ kind: "edit", id, prev });
   await load();
 }
 
 async function deleteBookmark(id) {
+  // Snapshot the full bookmark BEFORE the DELETE so undo can re-POST it.
+  // Restored deletes get a NEW server-assigned id (Store.Add always issues
+  // a fresh Crockford); the old id is gone forever.
+  const before = state.bookmarks.find((b) => b.id === id);
+  const prev = before
+    ? {
+        title: before.title,
+        url: before.url,
+        tags: [...(before.tags || [])],
+        aliases: [...(before.aliases || [])],
+      }
+    : null;
   const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), { method: "DELETE" });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (prev) state.undoStack.push({ kind: "delete", prev });
   await load();
+}
+
+// Undo the most recent successful add / edit / delete from this view's stack.
+// Silent: the reappearing / disappearing / reverting row IS the feedback.
+// On failure (e.g. user over-undid into a stale reference), alert and stop —
+// don't auto-skip or auto-recover.
+async function undo() {
+  if (state.undoStack.length === 0) return; // silent no-op
+  const entry = state.undoStack.pop();
+  try {
+    if (entry.kind === "delete") {
+      const r = await fetch("/api/bookmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(entry.prev),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } else if (entry.kind === "edit") {
+      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(entry.prev),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    } else if (entry.kind === "add") {
+      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+        method: "DELETE",
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    }
+    await load();
+  } catch (err) {
+    alert("undo failed: " + err.message);
+  }
 }

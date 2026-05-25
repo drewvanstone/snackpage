@@ -436,4 +436,144 @@ test.describe("snackpage picker — keymap and modes", () => {
     const req = await requestPromise;
     expect(req.url()).toContain(`/go/${id}`);
   });
+
+  // ---------------------------------------------------------------------------
+  // v1.5.2 — vim `u` undo (picker). Each test creates its own bookmark via the
+  // API with a unique tag so it doesn't depend on existing demo data or step on
+  // other tests sharing the demo server. Assertions go through /api/bookmarks
+  // rather than the rendered DOM to sidestep filter-state interaction.
+  // ---------------------------------------------------------------------------
+
+  test("u undoes a dd delete in picker", async ({ page, request }) => {
+    const tag = "undo-delete-" + Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: "U-Delete-Test",
+        url: "https://example.com/u-delete-" + Date.now(),
+        tags: [tag],
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+
+    await page.goto("/");
+    await page.locator("#q").focus();
+    await page.locator("#q").fill(tag);
+    await page.waitForFunction((t) => {
+      return [...document.querySelectorAll("#list li")].some((li) =>
+        li.querySelector(".sub")?.textContent?.includes(t),
+      );
+    }, tag);
+
+    // Drop into normal mode, dd to delete; count should fall to 0 since only
+    // our bookmark matches the query.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length === 0,
+    );
+
+    // u → undo. POSTs the snapshot back; the new bookmark has the same tag
+    // (and a NEW server-assigned id).
+    await page.keyboard.press("u");
+
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (j.bookmarks || []).some((b) => (b.tags || []).includes(t));
+    }, tag);
+
+    // Cleanup: delete the restored bookmark by its new id.
+    const list = await (await request.get("/api/bookmarks")).json();
+    const restored = (list.bookmarks || []).find((b) =>
+      (b.tags || []).includes(tag),
+    );
+    if (restored) await request.delete("/api/bookmarks/" + restored.id);
+  });
+
+  test("u undoes an edit (modal) in picker", async ({ page, request }) => {
+    const tag = "undo-edit-" + Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: "U-Edit-Before",
+        url: "https://example.com/u-edit-" + Date.now(),
+        tags: [tag],
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const created = await create.json();
+
+    await page.goto("/");
+    await page.locator("#q").focus();
+    await page.locator("#q").fill(tag);
+    await page.waitForFunction((t) => {
+      return [...document.querySelectorAll("#list li")].some((li) =>
+        li.querySelector(".sub")?.textContent?.includes(t),
+      );
+    }, tag);
+
+    // Open the edit modal, change the title, submit with Enter.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("e");
+    await page.locator("#m-title").fill("U-Edit-After");
+    await page.keyboard.press("Enter");
+
+    // Wait for the PUT to land server-side.
+    await page.waitForFunction(async (id) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (
+        (j.bookmarks || []).find((b) => b.id === id)?.title === "U-Edit-After"
+      );
+    }, created.id);
+
+    // Close-modal re-focuses #q → insert mode; Escape back to normal, then u.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("u");
+
+    // Title should be reverted to the pre-edit value.
+    await page.waitForFunction(async (id) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (
+        (j.bookmarks || []).find((b) => b.id === id)?.title === "U-Edit-Before"
+      );
+    }, created.id);
+
+    // Cleanup
+    await request.delete("/api/bookmarks/" + created.id);
+  });
+
+  test("u undoes an add (modal) in picker", async ({ page, request }) => {
+    const tag = "undo-add-" + Date.now();
+
+    await page.goto("/");
+    await page.locator("#q").focus();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("a");
+
+    // Modal: fill the fields, Enter to submit.
+    await page.locator("#m-url").fill("https://example.com/u-add-" + Date.now());
+    await page.locator("#m-title").fill("U-Add-Test");
+    await page.locator("#m-tags").fill(tag);
+    await page.keyboard.press("Enter");
+
+    // Wait for the POST to land — a bookmark with our tag should now exist.
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (j.bookmarks || []).some((b) => (b.tags || []).includes(t));
+    }, tag);
+
+    // closeModal() re-focuses #q (insert mode); Escape back to normal then u.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("u");
+
+    // Bookmark should be gone.
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return !(j.bookmarks || []).some((b) => (b.tags || []).includes(t));
+    }, tag);
+  });
 });

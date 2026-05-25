@@ -704,4 +704,161 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     expect(normalText).toContain("dd delete");
     expect(normalText).toContain("o/O");
   });
+
+  // ---------------------------------------------------------------------------
+  // v1.5.2 — vim `u` undo (manage). Each test creates its own bookmark via the
+  // API with a unique tag so it doesn't depend on other tests. Assertions go
+  // through /api/bookmarks rather than scanning the rendered table to avoid
+  // filter-state / row-ordering coupling.
+  // ---------------------------------------------------------------------------
+
+  test("u undoes a dd delete in manage", async ({ page, request }) => {
+    const tag = "manage-undo-delete-" + Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: "M-Delete-Test",
+        url: "https://example.com/m-delete-" + Date.now(),
+        tags: [tag],
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const created = await create.json();
+
+    await page.goto("/manage");
+    await page.waitForSelector(`tr[data-id="${created.id}"]`);
+
+    // Click the target row's title cell, then Esc → revert + normal mode.
+    await page
+      .locator(`tr[data-id="${created.id}"] input[data-field="title"]`)
+      .click();
+    await page.keyboard.press("Escape");
+
+    // dd → delete current row.
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.waitForFunction(
+      (id) => !document.querySelector(`tr[data-id="${id}"]`),
+      created.id,
+    );
+
+    // u → undo (POSTs the snapshot back; new bookmark with same tag, new id).
+    await page.keyboard.press("u");
+
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (j.bookmarks || []).some((b) => (b.tags || []).includes(t));
+    }, tag);
+
+    // Cleanup: find the restored bookmark by tag and delete it.
+    const list = await (await request.get("/api/bookmarks")).json();
+    const restored = (list.bookmarks || []).find((b) =>
+      (b.tags || []).includes(tag),
+    );
+    if (restored) await request.delete("/api/bookmarks/" + restored.id);
+  });
+
+  test("u undoes a cell edit in manage", async ({ page, request }) => {
+    const tag = "manage-undo-edit-" + Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: "M-Edit-Before",
+        url: "https://example.com/m-edit-" + Date.now(),
+        tags: [tag],
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const created = await create.json();
+
+    await page.goto("/manage");
+    await page.waitForSelector(`tr[data-id="${created.id}"]`);
+
+    // Focus the title cell, change the value, Tab to commit via blur.
+    const titleInput = page.locator(
+      `tr[data-id="${created.id}"] input[data-field="title"]`,
+    );
+    await titleInput.click();
+    await titleInput.fill("M-Edit-After");
+    await page.keyboard.press("Tab");
+
+    // Wait for the PUT round-trip to land.
+    await page.waitForFunction(async (id) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (
+        (j.bookmarks || []).find((b) => b.id === id)?.title === "M-Edit-After"
+      );
+    }, created.id);
+
+    // Esc out of insert (Tab moved focus to the url cell), then u → undo.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("u");
+
+    // Title should be reverted to "M-Edit-Before".
+    await page.waitForFunction(async (id) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (
+        (j.bookmarks || []).find((b) => b.id === id)?.title === "M-Edit-Before"
+      );
+    }, created.id);
+
+    // Cleanup
+    await request.delete("/api/bookmarks/" + created.id);
+  });
+
+  test("u undoes an o insert in manage", async ({ page, request }) => {
+    await page.goto("/manage");
+    await page.waitForSelector("tr[data-id]");
+
+    const uniqueTag = "manage-undo-add-" + Date.now();
+    const uniqueUrl = "https://example.com/m-add-" + Date.now();
+
+    // Need to be on a row to use `o`. Focus an existing row's title cell,
+    // then Esc → revert + normal mode.
+    await page.locator("tr[data-id] input[data-field='title']").first().click();
+    await page.keyboard.press("Escape");
+
+    // `o` inserts a draft row below the current row and focuses its title.
+    await page.keyboard.press("o");
+
+    // Sanity: focus moved to a draft row's title input (no data-id on row).
+    await page.waitForFunction(() => {
+      const el = document.activeElement as HTMLInputElement | null;
+      if (!el || el.dataset.field !== "title") return false;
+      const tr = el.closest("tr") as HTMLElement | null;
+      return Boolean(tr && !tr.dataset.id);
+    });
+
+    // Identify the draft row (the one containing the focused title input).
+    const draftRow = page.locator("tr:not([data-id])").last();
+
+    // Fill the fields. Order matters: fill tags BEFORE url so the url blur is
+    // what triggers the POST (which happens on the first blur where both
+    // title and url are non-empty). At that blur, readRowPayload(tr) snapshots
+    // ALL inputs in the row including tags.
+    await page.keyboard.type("M-Add-Test"); // title (already focused after `o`)
+    await draftRow.locator("input[data-field='tags']").fill(uniqueTag);
+    await draftRow.locator("input[data-field='url']").fill(uniqueUrl);
+    // Blur the url input to commit the POST.
+    await page.keyboard.press("Tab");
+
+    // Wait for the new bookmark with our unique tag to land server-side.
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return (j.bookmarks || []).some((b) => (b.tags || []).includes(t));
+    }, uniqueTag);
+
+    // Esc out of insert mode (Tab left focus on the tags input), then u.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("u");
+
+    // Bookmark with our tag should be gone.
+    await page.waitForFunction(async (t) => {
+      const r = await fetch("/api/bookmarks");
+      const j = await r.json();
+      return !(j.bookmarks || []).some((b) => (b.tags || []).includes(t));
+    }, uniqueTag);
+  });
 });

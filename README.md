@@ -131,6 +131,7 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 | `a` | normal | Add bookmark |
 | `e` | normal | Edit selected |
 | `d` `d` | normal | Delete selected |
+| `u` | normal | Undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
 | `?` | normal | Show keymap help overlay |
 | `Tab` / `Shift+Tab` | modal | Cycle fields |
 | `⏎` | modal | Save |
@@ -140,18 +141,32 @@ Reserved: `<Space>` in normal mode (future leader prefix for app commands).
 
 ### Manage view
 
-Visit `http://localhost:8765/manage` for a spreadsheet-style table of all bookmarks. Useful after a Chrome import drops 60+ rows with mediocre auto-tags and you want to clean them up in bulk.
+Visit `http://localhost:8765/manage` for a spreadsheet-style table of all bookmarks. Useful after a Chrome import drops 60+ rows with mediocre auto-tags and you want to clean them up in bulk. `u` undoes the last change, which is where it shines — bulk edits get a per-row safety net.
 
 - **Edit:** click any cell or Tab into it. Edits save automatically when you blur the cell (Tab away or click elsewhere). `Enter` saves the cell and jumps to the same column in the next row.
 - **Revert:** press `Esc` inside a cell to restore its pre-edit value without saving.
 - **Filter:** the filter input at the top is the first tab-stop. Fuzzy-matches across title / URL / tags / aliases; non-matching rows are hidden but kept in the DOM so in-flight edits aren't lost.
-- **Add:** click `+ Add` to insert a draft row at the top of the table; fill in title and URL, blur, and the bookmark is created.
-- **Delete:** click `✕` to arm the row (it turns red); click `✕` again within 2 seconds to confirm the delete. Clicking anywhere else cancels the pending delete.
+- **Add:** click `+ Add` (or press `o` / `O` in normal mode) to insert a draft row; fill in title and URL, blur, and the bookmark is created.
+- **Delete:** click `✕` to arm the row (it turns red); click `✕` again within 2 seconds to confirm. Or use `dd` in normal mode — the chord IS the confirmation.
+- **Undo:** `u` in normal mode reverses the last add / edit / delete. The stack lives in this view's memory only; refreshing or hopping to the picker resets it. Restored deletes get a fresh server id (the old one is gone).
 - **Validation:** invalid URLs get a red outline; the cell stays in `.invalid` until you fix it or press `Esc` to revert.
 
-Cross-link: there's a `manage` link in the picker footer and a `← picker` link at the top of the manage view.
+Normal-mode keymap (Esc out of any cell or the filter to enter normal mode):
 
-Phase A is browser-default Tab navigation only. Phase B (coming soon) will layer on the vim-modal keymap (`j`/`k`/`h`/`l` cell nav, `gg`/`G`, `dd`, `o`/`O` insert above/below) to match the picker.
+| Keys | Action |
+|---|---|
+| `h` / `j` / `k` / `l` | cell ← / row ↓ / row ↑ / cell → |
+| `Ctrl+D` / `Ctrl+U` | half-page row scroll |
+| `g` `g` / `G` | first / last row |
+| `i` / `⏎` | edit current cell |
+| `a` | edit, cursor at end |
+| `o` / `O` | new row below / above |
+| `d` `d` | delete current row |
+| `u` | undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
+| `/` | focus filter |
+| `?` | help overlay |
+
+Cross-link: there's a `manage` link in the picker footer and a `← picker` link at the top of the manage view.
 
 ## Storage
 
