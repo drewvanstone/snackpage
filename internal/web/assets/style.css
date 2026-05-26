@@ -189,6 +189,38 @@ body {
   font-weight: 600;
 }
 
+/* Theme picker overlay — reuses .modal-overlay/.modal for layout but renders
+   a list of themes. j/k navigates with live preview; Enter commits, Esc
+   reverts. The picker chrome re-themes on each preview because it uses the
+   shared CSS variables (--mauve, --surface0, …). */
+.theme-list {
+  list-style: none;
+  margin: 0 0 0.6rem 0;
+  padding: 0;
+}
+.theme-item {
+  display: grid;
+  grid-template-columns: 0.7rem 1fr;
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.45rem 0.55rem;
+  border-radius: 5px;
+  cursor: default;
+}
+.theme-item[aria-selected="true"] {
+  background: rgba(203, 166, 247, 0.16);
+}
+.theme-item .marker { color: var(--mauve); font-weight: bold; opacity: 0; }
+.theme-item[aria-selected="true"] .marker { opacity: 1; }
+.theme-name { color: var(--text); font-weight: 600; }
+.theme-name .active-label {
+  color: var(--overlay0);
+  font-weight: normal;
+  font-size: 0.72rem;
+  margin-left: 0.3rem;
+}
+.theme-desc { color: var(--overlay1); font-size: 0.78rem; margin-top: 1px; }
+
 /* Help overlay — reuses .modal-overlay/.modal but renders <dl> lists of
    key bindings instead of form fields. */
 .help-section { margin-bottom: 0.9rem; }

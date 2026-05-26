@@ -7,7 +7,7 @@
 // focus/blur — Esc inside a cell reverts (Phase A) and then blurs into
 // normal mode automatically.
 
-import { cycleTheme } from "./theme.js";
+import { openThemePicker } from "./theme.js";
 
 const FIELDS = ["title", "url", "tags", "aliases"];
 const MAX_COL = FIELDS.length - 1; // 0..3
@@ -747,7 +747,7 @@ const ACTIONS = {
   "undo":          () => undo(),
   "show-help":     () => showHelpOverlay(),
   "goto-picker":   () => { if (window.location.pathname !== "/") window.location.href = "/"; },
-  "cycle-theme":   () => cycleTheme(),
+  "open-theme-picker": () => openThemePicker(),
 };
 
 const KEYMAP_NORMAL = {
@@ -769,7 +769,7 @@ const KEYMAP_NORMAL = {
   // <Space> is the leader prefix — single Space alone is unbound; bound
   // chords below.
   " p":    "goto-picker",   // <Space>p — jump to picker (/)
-  " t":    "cycle-theme",   // <Space>t — cycle through built-in themes
+  " t":    "open-theme-picker",   // <Space>t — open theme picker overlay
 };
 
 function dispatchNormalKey(key, event) {
@@ -893,7 +893,7 @@ function showHelpOverlay() {
             <dt>/</dt><dd>focus filter</dd>
             <dt>?</dt><dd>this help</dd>
             <dt>&lt;Space&gt;p</dt><dd>jump to picker (/)</dd>
-            <dt>&lt;Space&gt;t</dt><dd>cycle theme</dd>
+            <dt>&lt;Space&gt;t</dt><dd>pick theme</dd>
           </dl>
         </div>
         <div class="modal-footer">

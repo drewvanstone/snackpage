@@ -134,12 +134,12 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 | `u` | normal | Undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
 | `?` | normal | Show keymap help overlay |
 | `<Space>` `m` | normal | Jump to `/manage` |
-| `<Space>` `t` | normal | Cycle theme |
+| `<Space>` `t` | normal | Open theme picker |
 | `Tab` / `Shift+Tab` | modal | Cycle fields |
 | `⏎` | modal | Save |
 | `⎋` | modal | Cancel |
 
-`<Space>` is the leader prefix. Bound today: `<Space>m` (jump to `/manage`), `<Space>t` (cycle theme). More chords (reload, etc.) come in v3.
+`<Space>` is the leader prefix. Bound today: `<Space>m` (jump to `/manage`), `<Space>t` (open theme picker). More chords (reload, etc.) come in v3.
 
 ### Theming
 
@@ -148,7 +148,7 @@ Two built-in themes:
 - `catppuccin-mocha` (default) — dark, mauve accents, modern look.
 - `classic-mac` — monochrome System-6 throwback (striped titlebar, stippled gray desktop, bordered tag chips, full-bleed black selected row, mode chip on the prompt's right edge).
 
-Switch via `<Space>t` in normal mode (cycles through both views), via `?theme=classic-mac` in the URL (one-off), or via `localStorage.snackpageTheme = "classic-mac"` (persisted). The choice is remembered across reloads, and applies to both the picker (`/`) and manage view (`/manage`).
+Switch via `<Space>t` in normal mode to open a modal picker: `j` / `k` (or `↑` / `↓`) navigates the theme list and live-previews each one as you go; `⏎` commits the highlighted theme and persists to `localStorage.snackpageTheme`; `⎋` reverts to whichever theme was active when the picker opened and closes without writing. You can also pick a theme via `?theme=classic-mac` in the URL (one-off, also persists) or by setting `localStorage.snackpageTheme = "classic-mac"` directly. The choice is remembered across reloads, and applies to both the picker (`/`) and manage view (`/manage`).
 
 User themes — drop a CSS file into `$XDG_CONFIG_HOME/snackpage/themes/` and select it by name — are planned for a later release.
 
@@ -180,7 +180,7 @@ Normal-mode keymap (Esc out of any cell or the filter to enter normal mode):
 | `/` | focus filter |
 | `?` | help overlay |
 | `<Space>` `p` | jump back to picker (`/`) |
-| `<Space>` `t` | cycle theme |
+| `<Space>` `t` | open theme picker |
 
 Cross-link: `<Space>m` in the picker jumps to `/manage`; `<Space>p` in the manage view jumps back to `/`. Visible links (`manage` in picker footer, `← picker` in manage header) work too.
 

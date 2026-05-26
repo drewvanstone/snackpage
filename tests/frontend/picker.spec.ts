@@ -100,42 +100,78 @@ test.describe("snackpage picker — theming", () => {
     await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
   });
 
-  test("<Space>t cycles themes from normal mode", async ({ page }) => {
-    // Start from a clean default. Reload after clearing storage so the
-    // bootstrap re-resolves and lands on catppuccin-mocha.
+  test("<Space>t opens theme picker with active theme highlighted", async ({ page }) => {
     await page.goto("/");
     await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
     await page.reload();
-    await page.waitForFunction(
-      () => document.getElementById("count")?.textContent !== "",
-    );
-    await expect(page.locator("html")).toHaveAttribute(
-      "data-theme",
-      "catppuccin-mocha",
-    );
-
-    // Drop into normal mode (the picker autofocuses the input → insert mode).
     await page.locator("#q").focus();
     await page.keyboard.press("Escape");
-    await expect(page.locator("#picker")).toHaveAttribute("data-mode", "normal");
-
-    // <Space>t cycles → classic-mac.
     await page.keyboard.press("Space");
     await page.keyboard.press("t");
-    await expect(page.locator("html")).toHaveAttribute(
-      "data-theme",
-      "classic-mac",
-    );
 
-    // Cycle again → back to catppuccin-mocha.
-    await page.keyboard.press("Space");
-    await page.keyboard.press("t");
-    await expect(page.locator("html")).toHaveAttribute(
-      "data-theme",
-      "catppuccin-mocha",
-    );
+    const overlay = page.locator(".theme-picker-overlay");
+    await expect(overlay).toBeVisible();
+    // The catppuccin-mocha row should be aria-selected
+    await expect(overlay.locator('.theme-item[data-theme-id="catppuccin-mocha"]'))
+      .toHaveAttribute("aria-selected", "true");
+  });
 
-    // Cleanup.
+  test("j/k in theme picker live-previews each theme", async ({ page }) => {
+    await page.goto("/");
     await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+    await page.reload();
+    await page.locator("#q").focus();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("t");
+
+    // Initially data-theme is catppuccin-mocha
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "catppuccin-mocha");
+
+    // j moves selection down → classic-mac → preview applies
+    await page.keyboard.press("j");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "classic-mac");
+
+    // localStorage NOT yet updated (preview only)
+    const stored = await page.evaluate(() => localStorage.getItem("snackpageTheme"));
+    expect(stored).toBeNull();
+  });
+
+  test("Enter in theme picker commits the highlighted theme", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+    await page.reload();
+    await page.locator("#q").focus();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("t");
+    await page.keyboard.press("j"); // → classic-mac preview
+    await page.keyboard.press("Enter"); // commit
+
+    await expect(page.locator(".theme-picker-overlay")).not.toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "classic-mac");
+    const stored = await page.evaluate(() => localStorage.getItem("snackpageTheme"));
+    expect(stored).toBe("classic-mac");
+
+    // Cleanup
+    await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+  });
+
+  test("Esc in theme picker reverts to pre-overlay theme", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+    await page.reload();
+    await page.locator("#q").focus();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Space");
+    await page.keyboard.press("t");
+    await page.keyboard.press("j"); // preview classic-mac
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "classic-mac");
+
+    await page.keyboard.press("Escape"); // cancel → revert
+    await expect(page.locator(".theme-picker-overlay")).not.toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "catppuccin-mocha");
+    const stored = await page.evaluate(() => localStorage.getItem("snackpageTheme"));
+    expect(stored).toBeNull();
   });
 });

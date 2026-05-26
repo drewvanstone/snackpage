@@ -266,6 +266,21 @@
 [data-theme="classic-mac"] .help-list dt { color: #000000; font-weight: bold; }
 [data-theme="classic-mac"] .help-list dd { color: #000000; }
 
+/* Theme picker — mirror the picker's full-bleed inverted selected row. */
+[data-theme="classic-mac"] .theme-item { border-radius: 0; }
+[data-theme="classic-mac"] .theme-item[aria-selected="true"] {
+  background: #000000;
+}
+[data-theme="classic-mac"] .theme-item[aria-selected="true"] .theme-name,
+[data-theme="classic-mac"] .theme-item[aria-selected="true"] .theme-desc,
+[data-theme="classic-mac"] .theme-item[aria-selected="true"] .active-label {
+  color: #ffffff;
+}
+[data-theme="classic-mac"] .theme-item[aria-selected="true"] .marker {
+  color: #ffffff;
+  opacity: 1;
+}
+
 /* ----------------------------- Manage --------------------------------- */
 
 /* Header bar — striped titlebar treatment plus the editable filter input.

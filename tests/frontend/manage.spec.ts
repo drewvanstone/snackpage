@@ -875,7 +875,7 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     expect(new URL(page.url()).pathname).toBe("/");
   });
 
-  test("<Space>t in normal mode cycles theme", async ({ page }) => {
+  test("<Space>t in normal mode opens theme picker", async ({ page }) => {
     // Start from default. Clean any localStorage from a prior test and
     // reload so the bootstrap re-resolves.
     await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
@@ -900,6 +900,22 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
 
     await page.keyboard.press("Space");
     await page.keyboard.press("t");
+
+    const overlay = page.locator(".theme-picker-overlay");
+    await expect(overlay).toBeVisible();
+    // The currently-active theme should be highlighted.
+    await expect(
+      overlay.locator('.theme-item[data-theme-id="catppuccin-mocha"]'),
+    ).toHaveAttribute("aria-selected", "true");
+
+    // j → preview classic-mac, Enter → commit.
+    await page.keyboard.press("j");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      "classic-mac",
+    );
+    await page.keyboard.press("Enter");
+    await expect(overlay).not.toBeVisible();
     await expect(page.locator("html")).toHaveAttribute(
       "data-theme",
       "classic-mac",
