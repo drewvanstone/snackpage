@@ -119,19 +119,25 @@ export function cycleTheme() {
   return next.id;
 }
 
-// Open a modal theme picker. j/k navigates and live-previews; Enter commits
-// (persists to localStorage); Esc reverts to the pre-overlay theme and
-// closes without writing. Same picker works in both the picker view and the
-// manage view (each has #modal-root).
+// Open a modal theme picker — a fzf-filtered list with the same insert/normal
+// modal-editor pattern as the main bookmark picker. Insert mode: type to
+// filter, ↑↓ nav. Normal mode (Esc from insert): j/k nav. Enter applies and
+// persists; second Esc from normal closes and reverts to the pre-overlay
+// theme. Same picker works in both the picker and manage views (each has
+// #modal-root).
 //
-// The overlay uses class .modal-overlay so app.js / manage.js's chord
-// dispatcher bails on its presence (same pattern as the Add/Edit and Help
-// modals).
+// Implementation note: the shell renders once; updateList()/updateHint() patch
+// in place so the <input> isn't destroyed on every keystroke (preserves caret
+// + focus). The overlay carries class .modal-overlay so app.js / manage.js's
+// chord dispatcher bails on its presence.
 export function openThemePicker() {
   const modalRoot = document.getElementById("modal-root");
   if (!modalRoot) return;
 
   const originalTheme = currentTheme();
+  let mode = "insert"; // "insert" | "normal"
+  let query = "";
+  let filtered = THEMES.slice();
   let selectedIdx = THEMES.findIndex((t) => t.id === originalTheme);
   if (selectedIdx < 0) selectedIdx = 0;
 
@@ -141,8 +147,64 @@ export function openThemePicker() {
     );
   }
 
-  function render() {
-    const items = THEMES.map((t, i) => {
+  function applyFilter() {
+    const q = query.trim();
+    if (!q) {
+      filtered = THEMES.slice();
+      return;
+    }
+    const F = window.fzf;
+    if (F && F.Fzf) {
+      const finder = new F.Fzf(THEMES, {
+        selector: (t) => `${t.name} ${t.description} ${t.id}`,
+      });
+      filtered = finder.find(q).map((r) => r.item);
+      return;
+    }
+    // Substring fallback when fzf failed to load.
+    const lq = q.toLowerCase();
+    filtered = THEMES.filter((t) =>
+      `${t.name} ${t.description} ${t.id}`.toLowerCase().includes(lq),
+    );
+  }
+
+  function clampSelected() {
+    if (filtered.length === 0) { selectedIdx = 0; return; }
+    if (selectedIdx >= filtered.length) selectedIdx = filtered.length - 1;
+    if (selectedIdx < 0) selectedIdx = 0;
+  }
+
+  function previewSelected() {
+    if (filtered.length > 0) previewTheme(filtered[selectedIdx].id);
+    // No matches: leave the current preview untouched (no jumpy snap-back).
+  }
+
+  function buildShell() {
+    modalRoot.innerHTML = `
+      <div class="modal-overlay theme-picker-overlay" role="dialog" aria-label="Theme picker" data-mode="${mode}">
+        <div class="modal theme-picker">
+          <h2><span>Theme</span><span class="esc">⎋⎋ to cancel</span></h2>
+          <div class="prompt theme-search">
+            <span class="glyph">❯</span>
+            <input id="theme-q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+          </div>
+          <ul class="theme-list" id="theme-list" aria-live="polite"></ul>
+          <div class="modal-footer">
+            <span id="theme-picker-hint"></span>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function updateList() {
+    const list = document.getElementById("theme-list");
+    if (!list) return;
+    if (filtered.length === 0) {
+      list.innerHTML = `<li class="theme-item empty">No themes match "${escapeHTML(query)}"</li>`;
+      return;
+    }
+    list.innerHTML = filtered.map((t, i) => {
       const isSelected = i === selectedIdx;
       const isActive = t.id === originalTheme;
       const activeLabel = isActive
@@ -158,17 +220,29 @@ export function openThemePicker() {
         </li>
       `;
     }).join("");
-    modalRoot.innerHTML = `
-      <div class="modal-overlay theme-picker-overlay" role="dialog" aria-label="Theme picker">
-        <div class="modal theme-picker">
-          <h2><span>Theme</span><span class="esc">⎋ to cancel</span></h2>
-          <ul class="theme-list">${items}</ul>
-          <div class="modal-footer">
-            <span>j/k select · ⏎ apply · ⎋ cancel</span>
-          </div>
-        </div>
-      </div>
-    `;
+    const sel = list.querySelector('[aria-selected="true"]');
+    if (sel) sel.scrollIntoView({ block: "nearest" });
+  }
+
+  function updateHint() {
+    const overlay = modalRoot.querySelector(".theme-picker-overlay");
+    if (overlay) overlay.setAttribute("data-mode", mode);
+    const hint = document.getElementById("theme-picker-hint");
+    if (hint) {
+      hint.textContent = mode === "insert"
+        ? "type to filter · ↑↓ select · ⏎ apply · ⎋ normal mode"
+        : "j/k select · ⏎ apply · i insert mode · ⎋ cancel";
+    }
+  }
+
+  function setMode(m) {
+    mode = m;
+    const $input = document.getElementById("theme-q");
+    if ($input) {
+      if (m === "insert") $input.focus();
+      else $input.blur();
+    }
+    updateHint();
   }
 
   function close() {
@@ -176,44 +250,101 @@ export function openThemePicker() {
     modalRoot.innerHTML = "";
   }
 
+  function navDown() {
+    if (filtered.length === 0) return;
+    selectedIdx = (selectedIdx + 1) % filtered.length;
+    previewSelected();
+    updateList();
+  }
+  function navUp() {
+    if (filtered.length === 0) return;
+    selectedIdx = (selectedIdx - 1 + filtered.length) % filtered.length;
+    previewSelected();
+    updateList();
+  }
+
   function onKeydown(e) {
-    if (e.key === "j" || e.key === "ArrowDown") {
-      e.preventDefault();
-      e.stopPropagation();
-      selectedIdx = (selectedIdx + 1) % THEMES.length;
-      previewTheme(THEMES[selectedIdx].id);
-      render();
-      return;
-    }
-    if (e.key === "k" || e.key === "ArrowUp") {
-      e.preventDefault();
-      e.stopPropagation();
-      selectedIdx = (selectedIdx - 1 + THEMES.length) % THEMES.length;
-      previewTheme(THEMES[selectedIdx].id);
-      render();
-      return;
-    }
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.stopPropagation();
-      setTheme(THEMES[selectedIdx].id);
-      close();
-      return;
-    }
+    // Esc cascade: insert → normal, normal → close (revert).
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      previewTheme(originalTheme);
+      if (mode === "insert") setMode("normal");
+      else {
+        previewTheme(originalTheme);
+        close();
+      }
+      return;
+    }
+    // Enter always applies (both modes).
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (filtered.length === 0) return;
+      setTheme(filtered[selectedIdx].id);
       close();
       return;
     }
+    // Arrows always nav (both modes).
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      navDown();
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      navUp();
+      return;
+    }
+    // Normal-mode chords.
+    if (mode === "normal") {
+      if (e.key === "Shift" || e.key === "Meta" || e.key === "Control" || e.key === "Alt") return;
+      if (e.key === "j") { e.preventDefault(); e.stopPropagation(); navDown(); return; }
+      if (e.key === "k") { e.preventDefault(); e.stopPropagation(); navUp(); return; }
+      if (e.key === "i" || e.key === "/") {
+        e.preventDefault();
+        e.stopPropagation();
+        setMode("insert");
+        return;
+      }
+      // Swallow other keys in normal mode — the input is blurred but we want
+      // to be defensive against the chord dispatcher behind us.
+      e.stopPropagation();
+      return;
+    }
+    // Insert mode: characters fall through to the focused input, which fires
+    // its `input` event handled below.
   }
 
-  // Capture phase so we override the page-level chord dispatcher.
+  function onInput(e) {
+    if (!e.target || e.target.id !== "theme-q") return;
+    query = e.target.value;
+    applyFilter();
+    selectedIdx = 0; // snap to top match on filter change
+    clampSelected();
+    previewSelected();
+    updateList();
+  }
+
+  function onClick(e) {
+    const li = e.target.closest && e.target.closest(".theme-item");
+    if (!li) return;
+    const id = li.getAttribute("data-theme-id");
+    if (!id) return;
+    setTheme(id);
+    close();
+  }
+
+  buildShell();
   document.addEventListener("keydown", onKeydown, true);
-  // Apply the active theme as the starting preview (no-op since it's already
-  // applied, but keeps the invariant that previewTheme is what controls the
-  // visible theme during the overlay's lifetime).
-  previewTheme(THEMES[selectedIdx].id);
-  render();
+  modalRoot.addEventListener("input", onInput);
+  modalRoot.addEventListener("click", onClick);
+
+  updateHint();
+  updateList();
+  previewSelected();
+  // Focus the input now that the shell is in the DOM. Initial mode is insert.
+  const $input = document.getElementById("theme-q");
+  if ($input) $input.focus();
 }

@@ -125,6 +125,14 @@ test.describe("snackpage picker — theming", () => {
     await page.keyboard.press("Space");
     await page.keyboard.press("t");
 
+    // Picker opens in insert mode (search input focused). Esc → normal mode
+    // so that j/k navigates instead of typing into the filter.
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".theme-picker-overlay")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
     // Initially data-theme is catppuccin-mocha
     await expect(page.locator("html")).toHaveAttribute("data-theme", "catppuccin-mocha");
 
@@ -145,6 +153,7 @@ test.describe("snackpage picker — theming", () => {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Space");
     await page.keyboard.press("t");
+    await page.keyboard.press("Escape"); // insert → normal so j navigates
     await page.keyboard.press("j"); // → classic-mac preview
     await page.keyboard.press("Enter"); // commit
 
@@ -165,10 +174,13 @@ test.describe("snackpage picker — theming", () => {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Space");
     await page.keyboard.press("t");
+    await page.keyboard.press("Escape"); // insert → normal so j navigates
     await page.keyboard.press("j"); // preview classic-mac
     await expect(page.locator("html")).toHaveAttribute("data-theme", "classic-mac");
 
-    await page.keyboard.press("Escape"); // cancel → revert
+    // Already in normal mode after the first Esc; the second Esc closes and
+    // reverts.
+    await page.keyboard.press("Escape");
     await expect(page.locator(".theme-picker-overlay")).not.toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "catppuccin-mocha");
     const stored = await page.evaluate(() => localStorage.getItem("snackpageTheme"));

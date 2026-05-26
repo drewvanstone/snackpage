@@ -908,6 +908,11 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
       overlay.locator('.theme-item[data-theme-id="catppuccin-mocha"]'),
     ).toHaveAttribute("aria-selected", "true");
 
+    // Picker opens in insert mode (search input focused). Esc → normal so j
+    // navigates the list instead of typing into the filter.
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveAttribute("data-mode", "normal");
+
     // j → preview classic-mac, Enter → commit.
     await page.keyboard.press("j");
     await expect(page.locator("html")).toHaveAttribute(

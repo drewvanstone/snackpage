@@ -189,14 +189,23 @@ body {
   font-weight: 600;
 }
 
-/* Theme picker overlay — reuses .modal-overlay/.modal for layout but renders
-   a list of themes. j/k navigates with live preview; Enter commits, Esc
-   reverts. The picker chrome re-themes on each preview because it uses the
-   shared CSS variables (--mauve, --surface0, …). */
+/* Theme picker overlay — fzf-filtered list with the same insert/normal modal
+   pattern as the main picker. Reuses .modal-overlay/.modal/.prompt for shell
+   + input styling; layers on its own list rules + a mode-aware caret/glyph
+   color (mirrors .picker[data-mode] styling). The chrome re-themes on each
+   preview because everything uses the shared CSS variables. */
+.theme-picker .theme-search {
+  margin-bottom: 0.8rem;
+}
+.theme-picker-overlay[data-mode="normal"] .theme-search .glyph { color: var(--mauve); }
+.theme-picker-overlay[data-mode="normal"] .theme-search input { caret-color: transparent; }
 .theme-list {
   list-style: none;
-  margin: 0 0 0.6rem 0;
+  margin: 0;
   padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  cursor: pointer;
 }
 .theme-item {
   display: grid;
@@ -205,10 +214,14 @@ body {
   align-items: start;
   padding: 0.45rem 0.55rem;
   border-radius: 5px;
-  cursor: default;
 }
 .theme-item[aria-selected="true"] {
   background: rgba(203, 166, 247, 0.16);
+}
+.theme-item.empty {
+  color: var(--overlay0);
+  font-style: italic;
+  cursor: default;
 }
 .theme-item .marker { color: var(--mauve); font-weight: bold; opacity: 0; }
 .theme-item[aria-selected="true"] .marker { opacity: 1; }
