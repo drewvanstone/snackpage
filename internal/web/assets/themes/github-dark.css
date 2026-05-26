@@ -1,0 +1,23 @@
+/* GitHub Dark theme — familiar GitHub aesthetic. */
+[data-theme="github-dark"] {
+  --base:      #0d1117;
+  --mantle:    #161b22;
+  --crust:     #010409;
+  --surface0:  #21262d;
+  --surface1:  #30363d;
+  --surface2:  #484f58;
+  --overlay0:  #6e7681;
+  --overlay1:  #8b949e;
+  --overlay2:  #a0a8b0;
+  --subtext0:  #b1bac4;
+  --subtext1:  #c0c7cf;
+  --text:      #c9d1d9;
+  --mauve:     #a371f7;
+  --pink:      #db61a2;
+  --rosewater: #d29922;
+  --red:       #f85149;
+  --peach:     #d29922;
+  --yellow:    #d29922;
+  --green:     #56d364;
+  --blue:      #58a6ff;
+}

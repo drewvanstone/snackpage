@@ -1,0 +1,23 @@
+/* Dracula theme — iconic dark purple. */
+[data-theme="dracula"] {
+  --base:      #282a36;
+  --mantle:    #21222c;
+  --crust:     #191a21;
+  --surface0:  #44475a;
+  --surface1:  #6272a4;
+  --surface2:  #7a8aba;
+  --overlay0:  #6272a4;
+  --overlay1:  #8b95b8;
+  --overlay2:  #a8b1cf;
+  --subtext0:  #c0c0d0;
+  --subtext1:  #d8d8e6;
+  --text:      #f8f8f2;
+  --mauve:     #bd93f9;
+  --pink:      #ff79c6;
+  --rosewater: #ffb86c;
+  --red:       #ff5555;
+  --peach:     #ffb86c;
+  --yellow:    #f1fa8c;
+  --green:     #50fa7b;
+  --blue:      #8be9fd;
+}

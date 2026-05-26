@@ -1,0 +1,23 @@
+/* Tomorrow Night theme — Chris Kempson's signature. */
+[data-theme="tomorrow-night"] {
+  --base:      #1d1f21;
+  --mantle:    #282a2e;
+  --crust:     #16181a;
+  --surface0:  #373b41;
+  --surface1:  #969896;
+  --surface2:  #b4b7b4;
+  --overlay0:  #969896;
+  --overlay1:  #b4b7b4;
+  --overlay2:  #c5c8c6;
+  --subtext0:  #c5c8c6;
+  --subtext1:  #e0e0e0;
+  --text:      #c5c8c6;
+  --mauve:     #b294bb;
+  --pink:      #b294bb;
+  --rosewater: #de935f;
+  --red:       #cc6666;
+  --peach:     #de935f;
+  --yellow:    #f0c674;
+  --green:     #b5bd68;
+  --blue:      #81a2be;
+}

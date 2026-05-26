@@ -1,0 +1,23 @@
+/* GitHub Light theme — GitHub daytime. */
+[data-theme="github-light"] {
+  --base:      #ffffff;
+  --mantle:    #f6f8fa;
+  --crust:     #eaeef2;
+  --surface0:  #d8dee4;
+  --surface1:  #d0d7de;
+  --surface2:  #afb8c1;
+  --overlay0:  #6e7781;
+  --overlay1:  #57606a;
+  --overlay2:  #424a53;
+  --subtext0:  #424a53;
+  --subtext1:  #32383f;
+  --text:      #24292f;
+  --mauve:     #8250df;
+  --pink:      #bf3989;
+  --rosewater: #cf222e;
+  --red:       #cf222e;
+  --peach:     #bc4c00;
+  --yellow:    #9a6700;
+  --green:     #1a7f37;
+  --blue:      #0969da;
+}

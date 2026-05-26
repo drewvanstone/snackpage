@@ -1,0 +1,23 @@
+/* One Dark theme — Atom's purple-blue classic. */
+[data-theme="one-dark"] {
+  --base:      #282c34;
+  --mantle:    #21252b;
+  --crust:     #1b1f24;
+  --surface0:  #3e4451;
+  --surface1:  #4b5263;
+  --surface2:  #545862;
+  --overlay0:  #5c6370;
+  --overlay1:  #7f848e;
+  --overlay2:  #9da5b4;
+  --subtext0:  #abb2bf;
+  --subtext1:  #b6bdca;
+  --text:      #abb2bf;
+  --mauve:     #c678dd;
+  --pink:      #c678dd;
+  --rosewater: #d19a66;
+  --red:       #e06c75;
+  --peach:     #d19a66;
+  --yellow:    #e5c07b;
+  --green:     #98c379;
+  --blue:      #61afef;
+}

@@ -1,0 +1,23 @@
+/* Rose Pine theme — pastel pink/mauve modern. */
+[data-theme="rose-pine"] {
+  --base:      #191724;
+  --mantle:    #1f1d2e;
+  --crust:     #16141f;
+  --surface0:  #26233a;
+  --surface1:  #6e6a86;
+  --surface2:  #908caa;
+  --overlay0:  #908caa;
+  --overlay1:  #a8a4bc;
+  --overlay2:  #c4c1d4;
+  --subtext0:  #d0cee4;
+  --subtext1:  #d8d6ec;
+  --text:      #e0def4;
+  --mauve:     #c4a7e7;
+  --pink:      #ebbcba;
+  --rosewater: #ebbcba;
+  --red:       #eb6f92;
+  --peach:     #f6c177;
+  --yellow:    #f6c177;
+  --green:     #9ccfd8;
+  --blue:      #31748f;
+}

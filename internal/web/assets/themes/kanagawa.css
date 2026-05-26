@@ -1,0 +1,23 @@
+/* Kanagawa theme — Sumi-e Japanese painting inspired. */
+[data-theme="kanagawa"] {
+  --base:      #1f1f28;
+  --mantle:    #181820;
+  --crust:     #16161d;
+  --surface0:  #2a2a37;
+  --surface1:  #363646;
+  --surface2:  #54546d;
+  --overlay0:  #54546d;
+  --overlay1:  #658594;
+  --overlay2:  #7e8a99;
+  --subtext0:  #c8c093;
+  --subtext1:  #d3cd9c;
+  --text:      #dcd7ba;
+  --mauve:     #957fb8;
+  --pink:      #d27e99;
+  --rosewater: #d27e99;
+  --red:       #ff5d62;
+  --peach:     #ffa066;
+  --yellow:    #e6c384;
+  --green:     #98bb6c;
+  --blue:      #7e9cd8;
+}

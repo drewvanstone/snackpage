@@ -1,0 +1,23 @@
+/* Solarized Dark theme — Ethan Schoonover high-contrast. */
+[data-theme="solarized-dark"] {
+  --base:      #002b36;
+  --mantle:    #073642;
+  --crust:     #00212b;
+  --surface0:  #073642;
+  --surface1:  #586e75;
+  --surface2:  #657b83;
+  --overlay0:  #586e75;
+  --overlay1:  #657b83;
+  --overlay2:  #839496;
+  --subtext0:  #93a1a1;
+  --subtext1:  #93a1a1;
+  --text:      #839496;
+  --mauve:     #6c71c4;
+  --pink:      #d33682;
+  --rosewater: #cb4b16;
+  --red:       #dc322f;
+  --peach:     #cb4b16;
+  --yellow:    #b58900;
+  --green:     #859900;
+  --blue:      #268bd2;
+}

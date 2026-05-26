@@ -1,0 +1,23 @@
+/* Catppuccin Latte theme — light sibling of Mocha. */
+[data-theme="catppuccin-latte"] {
+  --base:      #eff1f5;
+  --mantle:    #e6e9ef;
+  --crust:     #dce0e8;
+  --surface0:  #ccd0da;
+  --surface1:  #bcc0cc;
+  --surface2:  #acb0be;
+  --overlay0:  #9ca0b0;
+  --overlay1:  #8c8fa1;
+  --overlay2:  #7c7f93;
+  --subtext0:  #6c6f85;
+  --subtext1:  #5c5f77;
+  --text:      #4c4f69;
+  --mauve:     #8839ef;
+  --pink:      #ea76cb;
+  --rosewater: #dc8a78;
+  --red:       #d20f39;
+  --peach:     #fe640b;
+  --yellow:    #df8e1d;
+  --green:     #40a02b;
+  --blue:      #1e66f5;
+}

@@ -143,14 +143,21 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 
 ### Theming
 
-Two built-in themes:
+snackpage ships 17 built-in themes:
 
-- `catppuccin-mocha` (default) — dark, mauve accents, modern look.
-- `classic-mac` — monochrome System-6 throwback (striped titlebar, stippled gray desktop, bordered tag chips, full-bleed black selected row, mode chip on the prompt's right edge).
+**Defaults / special:**
+- `catppuccin-mocha` (default) — dark, mauve accents, modern
+- `classic-mac` — monochrome System-6 throwback (striped titlebar, stippled gray desktop, hard borders)
 
-Switch via `<Space>t` in normal mode to open a modal picker: `j` / `k` (or `↑` / `↓`) navigates the theme list and live-previews each one as you go; `⏎` commits the highlighted theme and persists to `localStorage.snackpageTheme`; `⎋` reverts to whichever theme was active when the picker opened and closes without writing. You can also pick a theme via `?theme=classic-mac` in the URL (one-off, also persists) or by setting `localStorage.snackpageTheme = "classic-mac"` directly. The choice is remembered across reloads, and applies to both the picker (`/`) and manage view (`/manage`).
+**Dark:**
+- `dracula` · `gruvbox-dark-medium` · `nord` · `tokyo-night` · `one-dark` · `solarized-dark` · `tomorrow-night` · `monokai` · `rose-pine` · `everforest-dark` · `kanagawa` · `github-dark`
 
-User themes — drop a CSS file into `$XDG_CONFIG_HOME/snackpage/themes/` and select it by name — are planned for a later release.
+**Light:**
+- `catppuccin-latte` · `solarized-light` · `github-light`
+
+Switch via `<Space>t` in normal mode (opens a picker with live preview), via `?theme=<id>` in the URL (one-off), or via `localStorage.snackpageTheme = "<id>"` (persisted). The choice is remembered across reloads and applies to both the picker (`/`) and manage view (`/manage`).
+
+Custom user themes — drop a CSS file into `$XDG_CONFIG_HOME/snackpage/themes/` and select it by name — are planned for a later release.
 
 ### Manage view
 

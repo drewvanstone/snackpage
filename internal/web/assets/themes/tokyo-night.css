@@ -1,0 +1,23 @@
+/* Tokyo Night theme — modern dark blue. */
+[data-theme="tokyo-night"] {
+  --base:      #1a1b26;
+  --mantle:    #16161e;
+  --crust:     #101015;
+  --surface0:  #283457;
+  --surface1:  #3b4261;
+  --surface2:  #414868;
+  --overlay0:  #565f89;
+  --overlay1:  #737aa2;
+  --overlay2:  #9099c1;
+  --subtext0:  #a9b1d6;
+  --subtext1:  #b4bcdc;
+  --text:      #c0caf5;
+  --mauve:     #bb9af7;
+  --pink:      #bb9af7;
+  --rosewater: #ff9e64;
+  --red:       #f7768e;
+  --peach:     #ff9e64;
+  --yellow:    #e0af68;
+  --green:     #9ece6a;
+  --blue:      #7aa2f7;
+}

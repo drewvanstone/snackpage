@@ -1,0 +1,23 @@
+/* Monokai theme — Sublime warm classic. */
+[data-theme="monokai"] {
+  --base:      #272822;
+  --mantle:    #1e1f1c;
+  --crust:     #181915;
+  --surface0:  #49483e;
+  --surface1:  #75715e;
+  --surface2:  #8f8c70;
+  --overlay0:  #75715e;
+  --overlay1:  #8f8c70;
+  --overlay2:  #b0ad95;
+  --subtext0:  #cccac1;
+  --subtext1:  #e2e0d6;
+  --text:      #f8f8f2;
+  --mauve:     #ae81ff;
+  --pink:      #f92672;
+  --rosewater: #fd971f;
+  --red:       #f92672;
+  --peach:     #fd971f;
+  --yellow:    #e6db74;
+  --green:     #a6e22e;
+  --blue:      #66d9ef;
+}

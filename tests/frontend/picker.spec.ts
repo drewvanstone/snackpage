@@ -174,4 +174,29 @@ test.describe("snackpage picker — theming", () => {
     const stored = await page.evaluate(() => localStorage.getItem("snackpageTheme"));
     expect(stored).toBeNull();
   });
+
+  test("every theme in the THEMES array loads via ?theme= and applies", async ({ page }) => {
+    // Read the full list from the running app to stay in sync with theme.js
+    await page.goto("/");
+    const ids = await page.evaluate(async () => {
+      const mod = await import("/static/theme.js");
+      return mod.THEMES.map((t) => t.id);
+    });
+    expect(ids.length).toBe(17);
+
+    for (const id of ids) {
+      await page.goto(`/?theme=${id}`);
+      await expect(page.locator("html")).toHaveAttribute("data-theme", id);
+      const linkHref = await page.locator("#theme-css").getAttribute("href");
+      expect(linkHref).toContain(`themes/${id}.css`);
+      // Sanity: at least the prompt glyph has a non-empty color set
+      const glyphColor = await page
+        .locator(".prompt .glyph")
+        .evaluate((el) => getComputedStyle(el).color);
+      expect(glyphColor).toMatch(/rgb/);
+    }
+
+    // Cleanup
+    await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+  });
 });

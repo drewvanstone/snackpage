@@ -1,0 +1,23 @@
+/* Nord theme — arctic blue and teal palette. */
+[data-theme="nord"] {
+  --base:      #2e3440;
+  --mantle:    #3b4252;
+  --crust:     #292e39;
+  --surface0:  #434c5e;
+  --surface1:  #4c566a;
+  --surface2:  #5e6779;
+  --overlay0:  #4c566a;
+  --overlay1:  #5e81ac;
+  --overlay2:  #7891b3;
+  --subtext0:  #d8dee9;
+  --subtext1:  #e5e9f0;
+  --text:      #d8dee9;
+  --mauve:     #b48ead;
+  --pink:      #b48ead;
+  --rosewater: #d08770;
+  --red:       #bf616a;
+  --peach:     #d08770;
+  --yellow:    #ebcb8b;
+  --green:     #a3be8c;
+  --blue:      #88c0d0;
+}

@@ -1,0 +1,23 @@
+/* Everforest Dark theme — green earth tones, Vim community favorite. */
+[data-theme="everforest-dark"] {
+  --base:      #2d353b;
+  --mantle:    #232a2e;
+  --crust:     #1d2226;
+  --surface0:  #343f44;
+  --surface1:  #3d484d;
+  --surface2:  #475258;
+  --overlay0:  #7a8478;
+  --overlay1:  #859289;
+  --overlay2:  #9da9a0;
+  --subtext0:  #b8c0a8;
+  --subtext1:  #c5cbb1;
+  --text:      #d3c6aa;
+  --mauve:     #d699b6;
+  --pink:      #d699b6;
+  --rosewater: #e69875;
+  --red:       #e67e80;
+  --peach:     #e69875;
+  --yellow:    #dbbc7f;
+  --green:     #a7c080;
+  --blue:      #7fbbb3;
+}

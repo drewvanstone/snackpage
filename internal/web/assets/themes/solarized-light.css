@@ -1,0 +1,23 @@
+/* Solarized Light theme — classic light counterpart. */
+[data-theme="solarized-light"] {
+  --base:      #fdf6e3;
+  --mantle:    #eee8d5;
+  --crust:     #e4ddc4;
+  --surface0:  #eee8d5;
+  --surface1:  #93a1a1;
+  --surface2:  #839496;
+  --overlay0:  #839496;
+  --overlay1:  #657b83;
+  --overlay2:  #586e75;
+  --subtext0:  #657b83;
+  --subtext1:  #586e75;
+  --text:      #586e75;
+  --mauve:     #6c71c4;
+  --pink:      #d33682;
+  --rosewater: #cb4b16;
+  --red:       #dc322f;
+  --peach:     #cb4b16;
+  --yellow:    #b58900;
+  --green:     #859900;
+  --blue:      #268bd2;
+}
