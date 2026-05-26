@@ -150,6 +150,13 @@ func validateBookmark(b *Bookmark) error {
 	if b.URL == "" {
 		return errors.New("url is required")
 	}
+	// Be permissive about scheme-less input: `google.com` becomes
+	// `https://google.com`. Lets users (and the in-page modal) skip the
+	// boilerplate without erroring. We only prepend when the input is
+	// clearly scheme-less — the absence of `://` is a reliable signal.
+	if !strings.Contains(b.URL, "://") {
+		b.URL = "https://" + b.URL
+	}
 	u, err := url.Parse(b.URL)
 	if err != nil {
 		return fmt.Errorf("invalid url: %w", err)

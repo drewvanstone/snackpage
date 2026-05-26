@@ -69,12 +69,39 @@ func TestStore_RejectsInvalid(t *testing.T) {
 		{"empty title", store.Bookmark{URL: "https://example.com"}},
 		{"empty url", store.Bookmark{Title: "x"}},
 		{"unparseable url", store.Bookmark{Title: "x", URL: "::::"}},
-		{"missing scheme", store.Bookmark{Title: "x", URL: "example.com"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := s.Add(tc.b); err == nil {
 				t.Error("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestStore_AutoPrependsHTTPS(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := store.New(dir)
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"bare host", "example.com", "https://example.com"},
+		{"host with path", "example.com/foo/bar", "https://example.com/foo/bar"},
+		{"already has https", "https://example.com", "https://example.com"},
+		{"already has http", "http://example.com", "http://example.com"},
+		{"trims whitespace then prepends", "  example.com  ", "https://example.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bm, err := s.Add(store.Bookmark{Title: "t", URL: tc.input})
+			if err != nil {
+				t.Fatalf("Add: %v", err)
+			}
+			if bm.URL != tc.want {
+				t.Errorf("URL = %q; want %q", bm.URL, tc.want)
 			}
 		})
 	}
