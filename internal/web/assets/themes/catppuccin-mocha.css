@@ -1,0 +1,28 @@
+/* default theme — Catppuccin Mocha
+ *
+ * Palette tokens consumed by style.css and manage.css via var(--name). Switching
+ * themes is a matter of swapping this file for another that redefines the same
+ * names — the base CSS doesn't need to change. */
+
+[data-theme="catppuccin-mocha"] {
+  --base:     #1e1e2e;
+  --mantle:   #181825;
+  --crust:    #11111b;
+  --surface0: #313244;
+  --surface1: #45475a;
+  --surface2: #585b70;
+  --overlay0: #6c7086;
+  --overlay1: #7f849c;
+  --overlay2: #9399b2;
+  --subtext0: #a6adc8;
+  --subtext1: #bac2de;
+  --text:     #cdd6f4;
+  --mauve:    #cba6f7;
+  --pink:     #f5c2e7;
+  --rosewater:#f5e0dc;
+  --red:      #f38ba8;
+  --peach:    #fab387;
+  --yellow:   #f9e2af;
+  --green:    #a6e3a1;
+  --blue:     #89b4fa;
+}

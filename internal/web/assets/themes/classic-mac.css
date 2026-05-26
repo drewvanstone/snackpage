@@ -1,0 +1,373 @@
+/* classic-mac — monochrome System-6 aesthetic.
+ *
+ * The base style.css uses Catppuccin var names (--mauve, --rosewater, …) so
+ * this theme overrides them with B&W equivalents and layers on pseudo-element
+ * decorations (striped titlebar, stippled desktop, bordered tag chips, mode
+ * chip on the prompt) via [data-theme="classic-mac"] selectors. No HTML
+ * structural changes — purely a CSS skin. */
+
+[data-theme="classic-mac"] {
+  --base:      #ffffff;
+  --mantle:    #ffffff;
+  --crust:     #f0f0f0;
+  --surface0:  #d8d8d8;
+  --surface1:  #a0a0a0;
+  --surface2:  #707070;
+  --overlay0:  #888888;
+  --overlay1:  #555555;
+  --overlay2:  #333333;
+  --subtext0:  #444444;
+  --subtext1:  #222222;
+  --text:      #000000;
+  --mauve:     #000000;
+  --pink:      #000000;
+  --rosewater: #000000;
+  --red:       #000000;
+  --peach:     #000000;
+  --yellow:    #000000;
+  --green:     #000000;
+  --blue:      #000000;
+}
+
+/* Use a sharper, era-appropriate stack. JetBrains Mono is great for code but
+   the original System 6 vibe is Chicago / Geneva / Monaco-flavored. We fall
+   through to whatever the user has. */
+[data-theme="classic-mac"] html,
+[data-theme="classic-mac"] body {
+  font-family: "Chicago", "Geneva", "Monaco", "Lucida Grande", -apple-system,
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+/* Stippled "desktop" background — the classic newsprint dot pattern outside
+   the window. Tweaked to read as gray at typical viewing distance. */
+[data-theme="classic-mac"] body {
+  background-color: #c0c0c0;
+  background-image: repeating-radial-gradient(
+    circle at 1px 1px,
+    rgba(0, 0, 0, 0.7) 0,
+    rgba(0, 0, 0, 0.7) 0.5px,
+    transparent 0.5px,
+    transparent 2px
+  );
+}
+
+/* ----------------------------- Picker --------------------------------- */
+
+/* The picker becomes a System-6 window: hard 1px border, no radius, hard
+   drop shadow. padding: 0 so the titlebar can be flush; body content
+   re-introduces its own padding below. */
+[data-theme="classic-mac"] .picker {
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Repurpose the existing .picker-title as the striped titlebar. The original
+   uppercase "snackpage" label is hidden; ::after paints a "SNACKPAGE" pill
+   centered on the stripes. */
+[data-theme="classic-mac"] .picker-title {
+  color: transparent;
+  font-size: 0;
+  height: 18px;
+  margin: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    #000 0,
+    #000 1px,
+    #fff 1px,
+    #fff 3px
+  );
+  position: relative;
+  letter-spacing: 0;
+}
+
+[data-theme="classic-mac"] .picker-title::after {
+  content: "SNACKPAGE";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  padding: 0 8px;
+  font-size: 0.65rem;
+  font-weight: bold;
+  letter-spacing: 0.15em;
+  color: #000000;
+}
+
+/* Restore body-content padding inside the now-flush picker. */
+[data-theme="classic-mac"] .prompt,
+[data-theme="classic-mac"] .list,
+[data-theme="classic-mac"] .footer {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+[data-theme="classic-mac"] .prompt   { margin-top:    0.6rem; }
+[data-theme="classic-mac"] .footer   { padding-bottom: 0.55rem; }
+
+/* Prompt — bordered B&W field. The mode chip lives at the right edge via
+   ::after; the leader prefix data-mode attribute toggles its label. */
+[data-theme="classic-mac"] .prompt {
+  border: 1px solid #000000;
+  border-radius: 0;
+  background: #ffffff;
+  padding: 0.4rem 0.7rem;
+  position: relative;
+  margin-bottom: 0.6rem;
+  /* Reserve space on the right so long queries don't run under the mode chip. */
+  padding-right: 4.5rem;
+}
+[data-theme="classic-mac"] .prompt .glyph { color: #000000; }
+[data-theme="classic-mac"] .prompt input {
+  caret-color: #000000;
+  color: #000000;
+}
+[data-theme="classic-mac"] .picker[data-mode="normal"] .prompt .glyph { color: #000000; }
+[data-theme="classic-mac"] .picker[data-mode="normal"] .prompt input { caret-color: transparent; }
+
+/* Mode chip pseudo — the visible label "insert" / "normal" floats at the
+   right edge of the prompt. */
+[data-theme="classic-mac"] .picker[data-mode="insert"] .prompt::after {
+  content: "insert";
+}
+[data-theme="classic-mac"] .picker[data-mode="normal"] .prompt::after {
+  content: "normal";
+}
+[data-theme="classic-mac"] .prompt::after {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 1px solid #000000;
+  padding: 0 6px;
+  font-size: 0.65rem;
+  font-weight: bold;
+  background: #ffffff;
+  color: #000000;
+  letter-spacing: 0.05em;
+}
+
+/* List rows: no chrome by default, full-bleed black for the selected one. */
+[data-theme="classic-mac"] .row {
+  border-radius: 0;
+  padding: 0.35rem 0.55rem;
+}
+[data-theme="classic-mac"] .row[aria-selected="true"] {
+  background: #000000;
+  color: #ffffff;
+}
+[data-theme="classic-mac"] .row[aria-selected="true"] .title,
+[data-theme="classic-mac"] .row[aria-selected="true"] .sub,
+[data-theme="classic-mac"] .row[aria-selected="true"] .meta,
+[data-theme="classic-mac"] .row[aria-selected="true"] .count {
+  color: #ffffff;
+}
+[data-theme="classic-mac"] .row[aria-selected="true"] .marker {
+  color: #ffffff;
+  opacity: 1;
+}
+
+/* Tag chiclets — inline bordered rectangles. */
+[data-theme="classic-mac"] .tag {
+  display: inline-block;
+  border: 1px solid #000000;
+  padding: 0 4px;
+  margin-right: 4px;
+  background: #ffffff;
+  color: #000000;
+  font-size: 0.7rem;
+  border-radius: 0;
+}
+/* Inside a black selected row the chip flips to white background, black text
+   so it stays legible against the inverted row. */
+[data-theme="classic-mac"] .row[aria-selected="true"] .tag {
+  background: #ffffff;
+  color: #000000;
+  border-color: #ffffff;
+}
+
+/* Footer */
+[data-theme="classic-mac"] .footer {
+  border-top: 1px solid #000000;
+  color: #000000;
+  font-size: 0.7rem;
+  margin-top: 0.55rem;
+  padding-top: 0.4rem;
+}
+
+/* Cross-link "manage" / "← picker" — plain underlined link */
+[data-theme="classic-mac"] .cross-link,
+[data-theme="classic-mac"] .back-link {
+  color: #000000;
+  text-decoration: underline;
+  border-bottom: none;
+}
+[data-theme="classic-mac"] .cross-link:hover,
+[data-theme="classic-mac"] .back-link:hover {
+  color: #000000;
+  border-bottom: none;
+}
+
+/* --------------------------- Help / modal ----------------------------- */
+
+[data-theme="classic-mac"] .modal-overlay {
+  background: rgba(192, 192, 192, 0.65);
+}
+[data-theme="classic-mac"] .modal {
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.3);
+}
+[data-theme="classic-mac"] .modal h2 { color: #000000; }
+[data-theme="classic-mac"] .modal h2 .esc { color: #555555; }
+[data-theme="classic-mac"] .field input {
+  background: #ffffff;
+  border: 1px solid #000000;
+  color: #000000;
+  border-radius: 0;
+}
+[data-theme="classic-mac"] .field input:focus {
+  border-color: #000000;
+  outline: 1px solid #000000;
+  outline-offset: -2px;
+}
+[data-theme="classic-mac"] .field .hint  { color: #555555; }
+/* Invalid field — dashed border substitutes for the red-outline cue. */
+[data-theme="classic-mac"] .field .error { color: #000000; font-weight: bold; }
+
+[data-theme="classic-mac"] .modal-footer {
+  border-top: 1px solid #000000;
+  color: #000000;
+}
+
+[data-theme="classic-mac"] .btn {
+  background: #ffffff;
+  border: 1px solid #000000;
+  color: #000000;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 #000000;
+}
+[data-theme="classic-mac"] .btn-primary {
+  background: #000000;
+  color: #ffffff;
+  border-color: #000000;
+}
+
+[data-theme="classic-mac"] .help-section-title {
+  color: #000000;
+  font-weight: bold;
+  border-bottom: 1px solid #000000;
+  padding-bottom: 0.15rem;
+  letter-spacing: 0.06em;
+}
+[data-theme="classic-mac"] .help-list dt { color: #000000; font-weight: bold; }
+[data-theme="classic-mac"] .help-list dd { color: #000000; }
+
+/* ----------------------------- Manage --------------------------------- */
+
+/* Header bar — striped titlebar treatment plus the editable filter input.
+   We can't easily hide the title text the way we do in the picker because
+   the header also contains interactive elements (back link, filter, +Add),
+   so this version simply borders the bar and gives the title a small all-caps
+   chip look. */
+[data-theme="classic-mac"] .manage-header {
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 0;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+}
+[data-theme="classic-mac"] .manage-title {
+  color: #000000;
+  font-weight: bold;
+  letter-spacing: 0.12em;
+}
+[data-theme="classic-mac"] #filter {
+  background: #ffffff;
+  border: 1px solid #000000;
+  color: #000000;
+  border-radius: 0;
+  caret-color: #000000;
+}
+[data-theme="classic-mac"] #filter:focus { border-color: #000000; outline: 1px solid #000000; outline-offset: -2px; }
+[data-theme="classic-mac"] #add-btn { /* btn shared with picker; same B&W. */ }
+
+[data-theme="classic-mac"] .manage-table-wrap {
+  background: #ffffff;
+  border: 1px solid #000000;
+  border-radius: 0;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.3);
+}
+[data-theme="classic-mac"] .manage-table { color: #000000; }
+[data-theme="classic-mac"] .manage-table thead th {
+  background: #ffffff;
+  color: #000000;
+  font-weight: bold;
+  border-bottom: 1px solid #000000;
+}
+[data-theme="classic-mac"] .manage-table tbody tr {
+  border-bottom: 1px solid #000000;
+}
+[data-theme="classic-mac"] .manage-table tbody tr:hover {
+  background: #ededed;
+}
+[data-theme="classic-mac"] .manage-table td {
+  border-right: 1px solid #000000;
+}
+[data-theme="classic-mac"] .manage-table td.cell input { color: #000000; caret-color: #000000; }
+[data-theme="classic-mac"] .manage-table td.cell input:focus {
+  background: #ffffff;
+  border-color: #000000;
+  outline: 1px solid #000000;
+  outline-offset: -2px;
+}
+[data-theme="classic-mac"] .manage-table td.cell input.invalid {
+  border: 1px dashed #000000;
+  background: #ededed;
+  color: #000000;
+}
+
+[data-theme="classic-mac"] .manage-table tbody tr.deleting {
+  background: #000000;
+  color: #ffffff;
+}
+[data-theme="classic-mac"] .manage-table tbody tr.deleting .del-btn {
+  color: #ffffff;
+  border-color: #ffffff;
+  background: #000000;
+}
+[data-theme="classic-mac"] .manage-table tbody tr.deleting td.cell input {
+  color: #ffffff;
+  background: transparent;
+}
+
+/* Normal-mode cursor — invert the active row, outline the active cell. The
+   selected row in the picker is full-bleed black; mirror that here. */
+[data-theme="classic-mac"] .manage-page[data-mode="normal"] tr[data-current="true"] {
+  background: #000000;
+}
+[data-theme="classic-mac"] .manage-page[data-mode="normal"] tr[data-current="true"] td.cell input {
+  color: #ffffff;
+  background: transparent;
+}
+[data-theme="classic-mac"] .manage-page[data-mode="normal"] td.cell[data-current="true"] {
+  outline: 2px solid #ffffff;
+  outline-offset: -2px;
+}
+
+[data-theme="classic-mac"] .del-btn {
+  color: #000000;
+  border-radius: 0;
+}
+[data-theme="classic-mac"] .del-btn:hover {
+  color: #000000;
+  border-color: #000000;
+  background: #ededed;
+}
+
+[data-theme="classic-mac"] .manage-footer {
+  color: #000000;
+}
+[data-theme="classic-mac"] .manage-hints { color: #000000; }

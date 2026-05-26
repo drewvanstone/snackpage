@@ -1,6 +1,8 @@
 // snackpage frontend. Vanilla JS, no build step.
 // Public surface: nothing — everything is module-scoped.
 
+import { cycleTheme } from "./theme.js";
+
 const state = {
   bookmarks: [],   // [{id,title,url,tags,aliases,visit_count,last_visit_at}]
   view: [],        // filtered + sorted subset rendered to DOM
@@ -145,11 +147,17 @@ function render() {
     li.className = "row";
     li.setAttribute("aria-selected", i === state.selected ? "true" : "false");
     li.dataset.id = b.id;
+    // Tags are wrapped in <span class="tag"> so themes can restyle them
+    // (e.g. classic-mac renders bordered chiclets). The "·" separator stays
+    // outside the spans so it's not styled with them.
+    const tagsHTML = b.tags && b.tags.length
+      ? "  ·  " + b.tags.map((t) => `<span class="tag">${escapeHTML(t)}</span>`).join(" ")
+      : "";
     li.innerHTML = `
       <span class="marker">▌</span>
       <div>
         <div class="title">${escapeHTML(b.title)}</div>
-        <div class="sub">${escapeHTML(b.url)}${b.tags && b.tags.length ? "  ·  " + b.tags.map(escapeHTML).join(", ") : ""}</div>
+        <div class="sub">${escapeHTML(b.url)}${tagsHTML}</div>
       </div>
       <div class="meta">${relTime(b.last_visit_at)}<span class="count">${b.visit_count || 0} visits</span></div>
     `;
@@ -247,6 +255,7 @@ const ACTIONS = {
   "undo":          () => undo(),
   "show-help":     () => showHelpOverlay(),
   "goto-manage":   () => { if (window.location.pathname !== "/manage") window.location.href = "/manage"; },
+  "cycle-theme":   () => cycleTheme(),
 };
 
 // Default keymap (picker, normal mode). Maps key-sequence strings → action
@@ -273,6 +282,7 @@ const KEYMAP_NORMAL = {
   "/":   "enter-insert",
   "?":   "show-help",
   " m":  "goto-manage",   // <Space>m — jump to /manage
+  " t":  "cycle-theme",   // <Space>t — cycle through built-in themes
 };
 
 function dispatchNormalKey(key, event) {
@@ -523,6 +533,7 @@ function showHelpOverlay() {
             <dt>u</dt><dd>undo last add/edit/delete</dd>
             <dt>?</dt><dd>this help</dd>
             <dt>&lt;Space&gt;m</dt><dd>jump to /manage</dd>
+            <dt>&lt;Space&gt;t</dt><dd>cycle theme</dd>
           </dl>
         </div>
         <div class="modal-footer">

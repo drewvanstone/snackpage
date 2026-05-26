@@ -1,26 +1,9 @@
-/* Catppuccin Mocha */
-:root {
-  --base:     #1e1e2e;
-  --mantle:   #181825;
-  --crust:    #11111b;
-  --surface0: #313244;
-  --surface1: #45475a;
-  --surface2: #585b70;
-  --overlay0: #6c7086;
-  --overlay1: #7f849c;
-  --overlay2: #9399b2;
-  --subtext0: #a6adc8;
-  --subtext1: #bac2de;
-  --text:     #cdd6f4;
-  --mauve:    #cba6f7;
-  --pink:     #f5c2e7;
-  --rosewater:#f5e0dc;
-  --red:      #f38ba8;
-  --peach:    #fab387;
-  --yellow:   #f9e2af;
-  --green:    #a6e3a1;
-  --blue:     #89b4fa;
-}
+/* snackpage base styles — structure only.
+ *
+ * Palette tokens (--base, --mauve, …) come from a theme CSS file under
+ * /static/themes/<name>.css, loaded ahead of this file by the inline
+ * bootstrap in index.html / manage.html. The base CSS only references
+ * variables; switching theme is a matter of swapping the theme file. */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 

@@ -4,6 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>snackpage</title>
+  <script>
+    // Resolve the active theme before paint to avoid FOUC.
+    //   priority: ?theme=X > localStorage.snackpageTheme > "catppuccin-mocha"
+    // A ?theme=X param is persisted into localStorage so the choice sticks
+    // across reloads. The theme <link> is appended dynamically — it lands
+    // AFTER style.css in DOM order so theme rules win cascade ties.
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var theme = params.get("theme") || localStorage.getItem("snackpageTheme") || "catppuccin-mocha";
+      if (params.has("theme")) localStorage.setItem("snackpageTheme", theme);
+      document.documentElement.setAttribute("data-theme", theme);
+      var link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.id = "theme-css";
+      link.href = "/static/themes/" + theme + ".css";
+      document.head.appendChild(link);
+    })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>

@@ -59,8 +59,15 @@ internal/web/              INTERFACE — embedded picker frontend (one of N poss
 ├── web.go                 //go:embed assets — exposes FS to the server
 └── assets/
     ├── index.html         Picker shell: prompt, list, footer, modal-root
-    ├── style.css          Catppuccin Mocha palette + picker/modal styles
+    ├── manage.html        Manage view shell: header, table, modal-root
+    ├── style.css          Structure-only base CSS (layout, sizes, spacing)
+    ├── manage.css         Manage-specific layout (table, cells, cursor)
+    ├── themes/            Built-in theme palettes (loaded by inline <head> bootstrap)
+    │   ├── catppuccin-mocha.css   Default theme — dark mauve-accented palette
+    │   └── classic-mac.css        System-6 monochrome (striped titlebar, stippled BG, B&W)
+    ├── theme.js           Runtime theme switcher (currentTheme/setTheme/cycleTheme)
     ├── app.js             Picker logic: load, render, fuzzy-rank, keymap, modal
+    ├── manage.js          Manage logic: rows, vim-modal cursor, CRUD on blur
     └── vendor/fzf.umd.min.js   fzf-for-js v0.5.2, vendored
 
 scripts/                   Development scripts
@@ -186,7 +193,7 @@ Where to plug in new behavior:
 | **New HTTP route** | `internal/server/<area>.go` + register in `server.go`'s `Handler()` | `internal/store` (unless you genuinely need new domain ops) |
 | **New bookmark field** | `internal/store/types.go` (struct + JSON tag), `validateBookmark` if validated, JS render in `app.js`, modal in `app.js`, server wire shape in `internal/server/bookmarks.go` | `internal/frecency` (purely score, doesn't see fields) |
 | **New picker layout (compact / detailed)** | `internal/web/assets/style.css` + a layout-switcher hook in `app.js` reading from a future user-config file | The HTML structure shouldn't need changing for layout-only switches |
-| **New theme** | Future: `internal/web/assets/themes/<name>.css` (built-in) and `$XDG_CONFIG_HOME/snackpage/themes/<name>.css` (user override). Picker loads a `data-theme` attribute on `<body>` and the CSS rules cascade from there. (Not implemented in v1.3; see §8 future work.) | The picker HTML/JS — themes are purely CSS. |
+| **New theme** | Add `internal/web/assets/themes/<name>.css` and append it to `THEMES` in `theme.js`. The CSS overrides Catppuccin var names (`--base`, `--mauve`, …) under a `[data-theme="<name>"]` selector and can layer on pseudo-element decorations (titlebar, mode chip, etc.). The inline `<head>` bootstrap resolves the active theme before paint; runtime swaps go through `cycleTheme()`. User themes from `$XDG_CONFIG_HOME/snackpage/themes/` remain a future addition (see §8). | The HTML structure or JS render — themes are purely CSS. |
 | **Alternative frontend** (e.g. Bubbletea TUI) | New package under `internal/`, new subcommand under `cmd/snackpage/` that boots it, all reading from `store.Store` directly | Existing frontends should be untouched. |
 | **New storage backend** (e.g. SQLite) | Introduce a `store.Repository` interface in domain, move file-backed code to `internal/store/file`, add `internal/store/sqlite` adapter. Today the interface is implicit because we have one adapter. | Defer interface extraction until the second adapter is real (YAGNI). |
 
@@ -194,7 +201,7 @@ Where to plug in new behavior:
 
 Aligned with Drew's vision for the project. Not committed roadmap (that's the spec); just architectural pointers.
 
-**Base16-style theming.** Today's Catppuccin Mocha is 20 CSS custom-properties in `style.css`. A base16 theme is a 16-color palette. The migration path: define snackpage's CSS in terms of a base16 vocabulary (`--base00` through `--base0F` for backgrounds and accents, plus a few semantic aliases like `--accent-primary` mapping to one of them), ship Catppuccin Mocha as the default `themes/catppuccin-mocha.yaml` (or `.css`), allow user overrides in `$XDG_CONFIG_HOME/snackpage/themes/`. References: [base16 spec](https://github.com/chriskempson/base16), [Catppuccin's base16 ports](https://github.com/catppuccin/base16).
+**Base16-style theming.** Shipped in v1.7 as two built-in themes (`catppuccin-mocha`, `classic-mac`). Each theme is a single CSS file under `internal/web/assets/themes/` that overrides `--base` / `--mauve` / etc. CSS variables under a `[data-theme="<name>"]` selector, and can layer on pseudo-element decorations (e.g. classic-mac's striped titlebar, stippled desktop, mode chip). The base `style.css` is structure-only and references only variables. An inline `<head>` bootstrap resolves the active theme before paint (URL param > localStorage > default), and `theme.js` exposes `cycleTheme()` for runtime swaps via `<Space>t`. User themes from `$XDG_CONFIG_HOME/snackpage/themes/<name>.css` remain a future addition. References: [base16 spec](https://github.com/chriskempson/base16), [Catppuccin's base16 ports](https://github.com/catppuccin/base16).
 
 **Layout configuration.** Two-line stacked (current) is one option. Compact (single-line dense) and detailed (more metadata visible) are obvious siblings. Mechanism: a small `$XDG_CONFIG_HOME/snackpage/config.toml` (or `config.json` to avoid adding a TOML dep) with keys like `layout = "compact" | "detailed"`, `font_size = "sm" | "md" | "lg"`, `theme = "catppuccin-mocha"`. The server reads it at startup, includes it in the index.html as a `data-*` attribute or inline JS variable, the frontend reacts. Frontend layout switching is pure CSS; no new render logic needed.
 

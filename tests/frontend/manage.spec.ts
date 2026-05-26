@@ -875,6 +875,40 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     expect(new URL(page.url()).pathname).toBe("/");
   });
 
+  test("<Space>t in normal mode cycles theme", async ({ page }) => {
+    // Start from default. Clean any localStorage from a prior test and
+    // reload so the bootstrap re-resolves.
+    await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+    await page.goto("/manage");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#rows tr").length > 0,
+      null,
+      { timeout: 5_000 },
+    );
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      "catppuccin-mocha",
+    );
+
+    // Filter is focused (insert); Esc → normal.
+    await page.locator("#filter").focus();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".manage-page")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    await page.keyboard.press("Space");
+    await page.keyboard.press("t");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      "classic-mac",
+    );
+
+    // Cleanup.
+    await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+  });
+
   test("Cmd+click on a URL cell opens it in a new tab and does NOT focus the cell", async ({
     page,
     request,
