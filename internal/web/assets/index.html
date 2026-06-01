@@ -22,7 +22,7 @@
       document.head.appendChild(link);
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css{{if .Version}}?v={{.Version}}{{end}}">
 </head>
 <body>
   <main class="picker" id="picker" data-mode="insert">
@@ -41,7 +41,7 @@
 
   <div id="modal-root"></div>
 
-  <script src="/static/vendor/fzf.umd.min.js"></script>
-  <script type="module" src="/static/app.js"></script>
+  <script src="/static/vendor/fzf.umd.min.js{{if .Version}}?v={{.Version}}{{end}}"></script>
+  <script type="module" src="/static/app.js{{if .Version}}?v={{.Version}}{{end}}"></script>
 </body>
 </html>

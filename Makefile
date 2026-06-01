@@ -37,11 +37,11 @@ run: build
 # the installed instance.
 dev-run: build
 	@mkdir -p $(DEV_DIR)
-	$(DEV_ENV) ./$(BIN) serve --addr 127.0.0.1:$(DEV_PORT)
+	$(DEV_ENV) ./$(BIN) serve --addr 127.0.0.1:$(DEV_PORT) --dev
 
 dev-demo: build
 	@mkdir -p $(DEV_DIR)
-	$(DEV_ENV) ./$(BIN) demo --addr 127.0.0.1:$(DEV_PORT)
+	$(DEV_ENV) ./$(BIN) demo --addr 127.0.0.1:$(DEV_PORT) --dev
 
 # Convenience: add a bookmark to the dev instance (assumes dev-run is up).
 # Usage: make dev-add URL=https://example.com TITLE="Example" TAGS=demo

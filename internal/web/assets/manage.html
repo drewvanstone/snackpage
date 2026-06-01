@@ -22,8 +22,8 @@
       document.head.appendChild(link);
     })();
   </script>
-  <link rel="stylesheet" href="/static/style.css">
-  <link rel="stylesheet" href="/static/manage.css">
+  <link rel="stylesheet" href="/static/style.css{{if .Version}}?v={{.Version}}{{end}}">
+  <link rel="stylesheet" href="/static/manage.css{{if .Version}}?v={{.Version}}{{end}}">
 </head>
 <body class="manage-body">
   <main class="manage manage-page" id="manage" data-mode="insert">
@@ -57,7 +57,7 @@
 
   <div id="modal-root"></div>
 
-  <script src="/static/vendor/fzf.umd.min.js"></script>
-  <script type="module" src="/static/manage.js"></script>
+  <script src="/static/vendor/fzf.umd.min.js{{if .Version}}?v={{.Version}}{{end}}"></script>
+  <script type="module" src="/static/manage.js{{if .Version}}?v={{.Version}}{{end}}"></script>
 </body>
 </html>

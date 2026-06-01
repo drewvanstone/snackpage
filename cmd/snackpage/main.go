@@ -49,8 +49,8 @@ func main() {
 
 func printUsage() {
 	fmt.Fprintln(os.Stderr, `Usage:
-  snackpage serve [--addr 127.0.0.1:8765] [--data-dir PATH] [--log-level info]
-  snackpage demo  [--addr 127.0.0.1:8765] [--log-level info]
+  snackpage serve [--addr 127.0.0.1:8765] [--data-dir PATH] [--log-level info] [--dev]
+  snackpage demo  [--addr 127.0.0.1:8765] [--log-level info] [--dev]
   snackpage add URL [--title T] [--tags t1,t2] [--aliases a1,a2] [--addr 127.0.0.1:8765] [--data-dir PATH]
   snackpage import chrome [--profile Default] [--path FILE] [--data-dir PATH] [--folder "Bookmarks bar/Dev"] [--dry-run]
   snackpage version
@@ -62,6 +62,7 @@ func runServe(args []string) int {
 	addr := fs.String("addr", "127.0.0.1:8765", "address to listen on (loopback recommended)")
 	dataDir := fs.String("data-dir", "", "override XDG data dir")
 	logLevel := fs.String("log-level", "info", "debug|info|warn|error")
+	dev := fs.Bool("dev", false, "dev mode: disable HTTP caching on /static and HTML so reloads pick up rebuilt assets")
 	_ = fs.Parse(args)
 
 	level, err := parseLevel(*logLevel)
@@ -87,7 +88,7 @@ func runServe(args []string) int {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.New(st, logger).Handler(),
+		Handler:           server.New(st, logger, server.Options{Dev: *dev, Version: version}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

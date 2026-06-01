@@ -50,7 +50,7 @@ internal/xdg/              INFRASTRUCTURE — path resolution
 └── xdg.go                 DataDir(app) honoring $XDG_DATA_HOME
 
 internal/server/           INTERFACE — HTTP adapter on top of store
-├── server.go              Mux setup, embed.FS subbing, handleIndex/handleHealthz
+├── server.go              Mux setup, embed.FS subbing, handleIndex/handleHealthz, html/template for ?v= version stamp, Options{Dev,Version} (dev mode wraps /static and HTML in Cache-Control: no-store)
 ├── middleware.go          logRequests + recoverPanics
 ├── bookmarks.go           bookmarkView + handleListBookmarks/Create/Update/Delete
 └── redirect.go            handleRedirect — /go/:id → 302 + best-effort Visit
@@ -126,7 +126,8 @@ When something feels architecturally fishy, it's almost always a layer violation
 ### Opening the picker (Cmd+T → http://localhost:8765/)
 
 ```
-Browser → server.handleIndex → serve internal/web/assets/index.html
+Browser → server.handleIndex → render internal/web/assets/index.html (html/template)
+                              → script tags get ?v=<build-version> if non-empty
        → app.js loads, fetches /api/bookmarks
        → server.handleListBookmarks → store.List() → snapshot (bms, stats)
        → bookmarkView{} merges stats into wire shape → JSON

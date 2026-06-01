@@ -25,7 +25,7 @@ snackpage serve
 
 First run creates `$XDG_DATA_HOME/snackpage/` (defaults to `~/.local/share/snackpage/`) with empty `bookmarks.json` and `state.json`.
 
-Override the data dir with `--data-dir PATH`, the address with `--addr HOST:PORT`, and the log level with `--log-level debug|info|warn|error`.
+Override the data dir with `--data-dir PATH`, the address with `--addr HOST:PORT`, and the log level with `--log-level debug|info|warn|error`. Pass `--dev` to disable browser caching on every static asset and rendered page — useful when iterating on the frontend with `make dev-run` (which sets it automatically).
 
 ### Demo
 

@@ -31,6 +31,7 @@ func runDemo(args []string) int {
 	fs := flag.NewFlagSet("demo", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8765", "address to listen on")
 	logLevel := fs.String("log-level", "info", "debug|info|warn|error")
+	dev := fs.Bool("dev", false, "dev mode: disable HTTP caching on /static and HTML so reloads pick up rebuilt assets")
 	_ = fs.Parse(args)
 
 	level, err := parseLevel(*logLevel)
@@ -62,7 +63,7 @@ func runDemo(args []string) int {
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           server.New(st, logger).Handler(),
+		Handler:           server.New(st, logger, server.Options{Dev: *dev, Version: version}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

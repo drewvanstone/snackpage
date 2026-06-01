@@ -14,13 +14,17 @@ import (
 )
 
 func newTestServer(t *testing.T) *httptest.Server {
+	return newTestServerWith(t, server.Options{})
+}
+
+func newTestServerWith(t *testing.T, opts server.Options) *httptest.Server {
 	t.Helper()
 	st, err := store.New(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := server.New(st, logger).Handler()
+	h := server.New(st, logger, opts).Handler()
 	return httptest.NewServer(h)
 }
 
@@ -76,6 +80,112 @@ func TestStaticAssets(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("%s: status = %d; want 200", path, resp.StatusCode)
 		}
+	}
+}
+
+// Default (non-dev) mode must not stamp a Cache-Control header on static
+// assets — browsers fall back to heuristic freshness, but a tagged release
+// gets cache-busted via the ?v=<version> query in handleIndex/handleManage.
+func TestStaticAssets_DefaultNoCacheControl(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/static/theme.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Cache-Control"); got != "" {
+		t.Errorf("Cache-Control = %q; want empty (no-op default)", got)
+	}
+}
+
+// Dev mode must disable caching on every static asset so that `make dev-run`
+// + a normal reload picks up freshly-rebuilt theme.js / CSS / images.
+func TestStaticAssets_DevModeNoStore(t *testing.T) {
+	ts := newTestServerWith(t, server.Options{Dev: true})
+	defer ts.Close()
+
+	for _, path := range []string{"/static/theme.js", "/static/style.css", "/static/themes/gen-art.css"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q; want %q", path, got, "no-store")
+		}
+	}
+}
+
+// In dev mode the rendered HTML pages must also be uncached — otherwise the
+// browser might keep a stale shell that still references old script URLs.
+func TestIndex_DevModeNoStore(t *testing.T) {
+	ts := newTestServerWith(t, server.Options{Dev: true})
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q; want %q", got, "no-store")
+	}
+}
+
+// When the binary is built with a version stamp, the rendered HTML must
+// append ?v=<version> to the entry-point script so a release invalidates
+// stale browser-cached JS/CSS. ES modules carry that query through to
+// relative imports, so versioning app.js is enough to bust theme.js too.
+func TestIndex_VersionStamp(t *testing.T) {
+	ts := newTestServerWith(t, server.Options{Version: "v1.2.3"})
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `/static/app.js?v=v1.2.3`) {
+		t.Errorf("index missing versioned app.js; body:\n%s", body)
+	}
+}
+
+// Without a version (e.g. `go run` builds where ldflags didn't fire), the
+// script src must NOT carry a dangling `?v=` — we'd rather have no query at
+// all than an empty one that some caches treat as a distinct resource.
+func TestIndex_NoVersionStamp(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), `app.js?v=`) {
+		t.Errorf("index has dangling ?v= with no version set; body:\n%s", body)
+	}
+	if !strings.Contains(string(body), `/static/app.js"`) {
+		t.Errorf("index missing bare app.js script tag; body:\n%s", body)
+	}
+}
+
+func TestManage_VersionStamp(t *testing.T) {
+	ts := newTestServerWith(t, server.Options{Version: "v9.9.9"})
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/manage")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `/static/manage.js?v=v9.9.9`) {
+		t.Errorf("manage missing versioned manage.js; body:\n%s", body)
 	}
 }
 
