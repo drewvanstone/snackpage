@@ -143,11 +143,13 @@ The list starts empty — type to filter. Backspacing back to empty hides the li
 
 ### Theming
 
-snackpage ships 17 built-in themes:
+snackpage ships 19 built-in themes:
 
-**Defaults / special:**
+**Defaults / design-driven:**
 - `catppuccin-mocha` (default) — dark, mauve accents, modern
 - `classic-mac` — monochrome System-6 throwback (striped titlebar, stippled gray desktop, hard borders)
+- `gen-art` — generative tiles + oversized numerals (light)
+- `gen-art-dark` — generative tiles + oversized numerals (dark)
 
 **Dark:**
 - `dracula` · `gruvbox-dark-medium` · `nord` · `tokyo-night` · `one-dark` · `solarized-dark` · `tomorrow-night` · `monokai` · `rose-pine` · `everforest-dark` · `kanagawa` · `github-dark`

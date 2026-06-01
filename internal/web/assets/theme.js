@@ -21,6 +21,16 @@ export const THEMES = [
     name: "Classic Mac",
     description: "System-6 monochrome throwback",
   },
+  {
+    id: "gen-art",
+    name: "Gen Art",
+    description: "Generative tiles, oversized numerals, light",
+  },
+  {
+    id: "gen-art-dark",
+    name: "Gen Art Dark",
+    description: "Generative tiles, oversized numerals, dark",
+  },
   { id: "dracula", name: "Dracula", description: "Iconic dark purple" },
   {
     id: "gruvbox-dark-medium",
