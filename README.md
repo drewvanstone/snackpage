@@ -25,7 +25,7 @@ snackpage serve
 
 First run creates `$XDG_DATA_HOME/snackpage/` (defaults to `~/.local/share/snackpage/`) with empty `bookmarks.json` and `state.json`.
 
-Override the data dir with `--data-dir PATH`, the address with `--addr HOST:PORT`, and the log level with `--log-level debug|info|warn|error`. Pass `--dev` to disable browser caching on every static asset and rendered page — useful when iterating on the frontend with `make dev-run` (which sets it automatically).
+Override the data dir with `--data-dir PATH`, the address with `--addr HOST:PORT`, and the log level with `--log-level debug|info|warn|error`. Pass `--dev` to disable browser caching on every static asset and rendered page — useful when iterating on the frontend with `make dev` (which sets it automatically).
 
 ### Demo
 
@@ -230,16 +230,18 @@ To **restore** on a new machine: drop `bookmarks.json` into `~/.local/share/snac
 ## Development
 
 ```bash
+make help          # list targets
 make test          # Go unit + integration tests with race detector
 make lint          # go vet (+ golangci-lint if installed)
 make fmt           # gofmt -s -w
-make dev-run       # build and serve against .dev/ on :8766 with --dev (no cache)
-make dev-demo      # like dev-run but seeded with 100 demo bookmarks
+make dev           # build and serve against .dev/ on :8766 with --dev (no cache)
+make dev-demo      # like dev but seeded with 100 demo bookmarks
 make dev-stop      # SIGTERM whatever is listening on :8766 (idempotent)
+make dev-restart   # dev-stop then dev
 make install       # install to $(PREFIX)/bin (default ~/.local/bin)
 ```
 
-Make targets always bind `127.0.0.1:8766` and the isolated `.dev/` data dir — never the installed daemon's `127.0.0.1:8765` + `$XDG_DATA_HOME/snackpage/`. If you want to test a freshly-built binary against real bookmarks, run `./snackpage serve` by hand after stopping the installed service.
+Make targets always bind `127.0.0.1:8766` and the isolated `.dev/` data dir — never the installed daemon's `127.0.0.1:8765` + `$XDG_DATA_HOME/snackpage/`. If you want to test a freshly-built binary against real bookmarks, run `./snackpage serve` by hand after stopping the installed service. `DEV_PORT` is overridable, so `make DEV_PORT=9999 dev` lets a second dev instance coexist.
 
 ## Architecture
 
