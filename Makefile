@@ -1,4 +1,4 @@
-.PHONY: all build test test-frontend setup-frontend lint fmt run dev-run dev-demo dev-add clean install e2e
+.PHONY: all build test test-frontend setup-frontend lint fmt dev-run dev-demo dev-add dev-stop clean install e2e
 
 BIN := snackpage
 PREFIX ?= $(HOME)/.local
@@ -30,11 +30,12 @@ lint:
 fmt:
 	gofmt -s -w .
 
-run: build
-	./$(BIN) serve
-
-# Dev variants: isolated XDG data dir, alternate port. Safe to run alongside
-# the installed instance.
+# Dev variants always bind $(DEV_PORT) against $(DEV_DIR), never the canonical
+# 127.0.0.1:8765 + $XDG_DATA_HOME path. That port + data dir belong to the
+# installed daemon (brew, etc.); having a make target reach for them risks
+# two processes mutating the same bookmarks.json. If you want to test a
+# fresh build against real data, run `./snackpage serve` by hand after
+# stopping the installed service — make won't help you do it by accident.
 dev-run: build
 	@mkdir -p $(DEV_DIR)
 	$(DEV_ENV) ./$(BIN) serve --addr 127.0.0.1:$(DEV_PORT) --dev
@@ -42,6 +43,23 @@ dev-run: build
 dev-demo: build
 	@mkdir -p $(DEV_DIR)
 	$(DEV_ENV) ./$(BIN) demo --addr 127.0.0.1:$(DEV_PORT) --dev
+
+# Stop whatever is listening on $(DEV_PORT). Useful when a dev daemon was
+# launched headlessly (e.g. from an agent shell) and has no TTY to Ctrl-C,
+# or when you just want a clean restart without hunting the PID by hand.
+# SIGTERM first so the Go signal handler can shut down gracefully; if the
+# port is still bound after ~2s, escalate to SIGKILL.
+dev-stop:
+	@pid=$$(lsof -tiTCP:$(DEV_PORT) -sTCP:LISTEN 2>/dev/null); \
+	 if [ -z "$$pid" ]; then echo "no dev daemon on :$(DEV_PORT)"; exit 0; fi; \
+	 echo "stopping dev daemon (pid $$pid on :$(DEV_PORT))"; \
+	 kill $$pid; \
+	 for i in 1 2 3 4 5 6 7 8 9 10; do \
+	   sleep 0.2; \
+	   [ -z "$$(lsof -tiTCP:$(DEV_PORT) -sTCP:LISTEN 2>/dev/null)" ] && exit 0; \
+	 done; \
+	 echo "still bound after 2s, escalating to SIGKILL"; \
+	 kill -9 $$pid 2>/dev/null || true
 
 # Convenience: add a bookmark to the dev instance (assumes dev-run is up).
 # Usage: make dev-add URL=https://example.com TITLE="Example" TAGS=demo

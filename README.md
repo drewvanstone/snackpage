@@ -230,11 +230,16 @@ To **restore** on a new machine: drop `bookmarks.json` into `~/.local/share/snac
 ## Development
 
 ```bash
-make test       # unit + integration tests with race detector
-make lint       # go vet (+ golangci-lint if installed)
-make fmt        # gofmt -s -w
-make run        # build and serve
+make test          # Go unit + integration tests with race detector
+make lint          # go vet (+ golangci-lint if installed)
+make fmt           # gofmt -s -w
+make dev-run       # build and serve against .dev/ on :8766 with --dev (no cache)
+make dev-demo      # like dev-run but seeded with 100 demo bookmarks
+make dev-stop      # SIGTERM whatever is listening on :8766 (idempotent)
+make install       # install to $(PREFIX)/bin (default ~/.local/bin)
 ```
+
+Make targets always bind `127.0.0.1:8766` and the isolated `.dev/` data dir — never the installed daemon's `127.0.0.1:8765` + `$XDG_DATA_HOME/snackpage/`. If you want to test a freshly-built binary against real bookmarks, run `./snackpage serve` by hand after stopping the installed service.
 
 ## Architecture
 

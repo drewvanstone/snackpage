@@ -60,9 +60,11 @@ If you skipped one of these, ask yourself why before committing.
 
 ## Dev workflow
 
-- `make run` builds and runs against the **real** `$XDG_DATA_HOME/snackpage/`. Don't use this while iterating.
-- `make dev-run` builds and runs against `.dev/` (isolated XDG dirs, port 8766). This is the daily-driver dev command. Same goes for `make dev-demo`.
-- The two can run simultaneously (different ports + different data dirs), so you can have your real picker open in one tab and a dev instance in another.
+- Make targets never bind `127.0.0.1:8765` or touch `$XDG_DATA_HOME/snackpage/`. That port + data dir belong exclusively to the installed daemon (brew). Two processes against the same `bookmarks.json` is a lost-update hazard, so we don't let make make that easy.
+- `make dev-run` builds and runs against `.dev/` (isolated XDG dirs, port 8766) with `--dev` set so HTTP caching is disabled. Daily-driver dev command. Same goes for `make dev-demo` (seeded with demo data).
+- A dev instance and the installed instance can run simultaneously — different ports, different data dirs — so you can keep your real picker open while iterating.
+- `make dev-stop` SIGTERMs whatever is bound to `:8766` (with a SIGKILL fallback after ~2s). Useful when a dev daemon was launched headlessly — e.g. from an agent shell — and there's no TTY to Ctrl-C.
+- To test a freshly-built binary against real data, run `./snackpage serve` by hand after stopping the installed service. There's no make target for it on purpose.
 - After dev work, `make clean` removes `.dev/` and the binary.
 
 ## Things to never do
