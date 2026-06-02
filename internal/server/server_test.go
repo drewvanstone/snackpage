@@ -106,7 +106,7 @@ func TestStaticAssets_DevModeNoStore(t *testing.T) {
 	ts := newTestServerWith(t, server.Options{Dev: true})
 	defer ts.Close()
 
-	for _, path := range []string{"/static/theme.js", "/static/style.css", "/static/themes/gen-art.css"} {
+	for _, path := range []string{"/static/theme.js", "/static/style.css", "/static/themes/catppuccin-mocha.css"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
