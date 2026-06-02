@@ -140,6 +140,20 @@ function escapeHTML(s) {
   return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 }
 
+// Compact URL display for the row sub-line. Titles are the primary identifier
+// so the host alone is enough at a glance; the full URL stays on hover via
+// the title= attribute. Falls back to the raw URL on parse error so weird
+// schemes (data:, chrome:, file:) still render something.
+function displayHost(url) {
+  try {
+    const u = new URL(url);
+    if (!u.hostname) return url;
+    return u.hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function render() {
   $list.innerHTML = "";
   state.view.forEach((b, i) => {
@@ -157,7 +171,7 @@ function render() {
       <span class="marker">▌</span>
       <div>
         <div class="title">${escapeHTML(b.title)}</div>
-        <div class="sub">${escapeHTML(b.url)}${tagsHTML}</div>
+        <div class="sub" title="${escapeHTML(b.url)}">${escapeHTML(displayHost(b.url))}${tagsHTML}</div>
       </div>
       <div class="meta">${relTime(b.last_visit_at)}<span class="count">${b.visit_count || 0} visits</span></div>
     `;
