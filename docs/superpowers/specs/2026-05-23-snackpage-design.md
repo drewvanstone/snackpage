@@ -3,8 +3,10 @@
 > **Historical design record:** This document captures the May 2026 v1
 > brainstorm and later roadmap notes. Shipped behavior has evolved; use
 > `README.md` for user-facing behavior and `ARCHITECTURE.md` for current
-> invariants. In particular, continuous synchronization or manual replacement
-> of the JSON files is safe only while the daemon is stopped.
+> invariants. The shipped picker hides results for an empty query and applies
+> relevance admission before field weighting, unlike the early notes below.
+> Continuous synchronization or manual replacement of the JSON files is safe
+> only while the daemon is stopped.
 
 **Status:** historical, originally brainstormed 2026-05-23
 **Owner:** Drew Flower (`dflower@nvidia.com`)

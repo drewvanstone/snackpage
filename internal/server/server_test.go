@@ -90,7 +90,7 @@ func TestStaticAssets(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()
 
-	for _, path := range []string{"/static/style.css", "/static/app.js"} {
+	for _, path := range []string{"/static/style.css", "/static/app.js", "/static/search.js"} {
 		resp, err := http.Get(ts.URL + path)
 		if err != nil {
 			t.Fatal(err)

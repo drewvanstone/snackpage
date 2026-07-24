@@ -306,13 +306,27 @@ scores:
 title × 4 + aliases × 3 + tags × 2 + URL × 1
 ```
 
+Literal substrings always qualify. Non-contiguous fzf matches qualify only
+when the score for an individual field is at least 70% of the ideal contiguous
+score for that query. Title, alias, and tag initials also support explicit
+acronym matches. URL fuzzy matching is scoped to one hostname label, so
+hostname characters cannot combine with a distant path or query component.
+Literal matches lead and may be joined by threshold-qualified alias/tag
+matches for queries of at least three characters because those fields are
+intentionally curated search metadata. With no literals, the strongest
+non-empty confidence tier wins: acronym, then quality-filtered fuzzy. The field
+weights rank admitted matches; they cannot rescue weak title or hostname
+matches when a literal result exists.
+
 Server-computed `frecency_score` is a small tie-breaker, followed by title, URL,
 and ID for deterministic order. The browser does not duplicate the frecency
-formula. An empty query deliberately renders no results.
+formula. Picker and manage filtering share these relevance rules. An empty
+picker query deliberately renders no results.
 
 Selection is tracked by bookmark ID, not array index. A new query selects the
-top match; reloads preserve the same visible ID when possible. Page focus and
-`pageshow` refresh statistics after returning from a navigation.
+top match and resets the result scroll position; reloads preserve the same
+visible ID when possible. Page focus and `pageshow` refresh statistics after
+returning from a navigation.
 
 ### Manage view
 

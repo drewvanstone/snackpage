@@ -2,6 +2,7 @@
 // Public surface: nothing — everything is module-scoped.
 
 import { openThemePicker } from "./theme.js";
+import { scoreBookmarkMatches } from "./search.js";
 
 const state = {
   bookmarks: [],   // [{id,title,url,tags,aliases,visit_count,last_visit_at,frecency_score}]
@@ -140,42 +141,15 @@ function refresh({ resetSelection = false } = {}) {
   render();
 }
 
-// Weighted fzf ranking. Falls back to substring match if fzf failed to load.
+// Rank the matches admitted by the shared relevance filter. Frecency remains
+// a small tie-breaker after weighted title/alias/tag/URL match quality.
 function fuzzyRank(q, items) {
-  const F = window.fzf;
-  if (!F) {
-    const ql = q.toLowerCase();
-    return items.filter(b =>
-      b.title.toLowerCase().includes(ql) ||
-      b.url.toLowerCase().includes(ql) ||
-      (b.tags || []).some(t => t.toLowerCase().includes(ql)) ||
-      (b.aliases || []).some(a => a.toLowerCase().includes(ql))
-    );
-  }
-  // fzf-for-js: build a Fzf finder per field, score, sum.
-  const titleFinder = new F.Fzf(items, { selector: i => i.title });
-  const urlFinder = new F.Fzf(items, { selector: i => i.url });
-  const tagsFinder = new F.Fzf(items, { selector: i => (i.tags || []).join(" ") });
-  const aliasFinder = new F.Fzf(items, { selector: i => (i.aliases || []).join(" ") });
-
-  const scoreMap = new Map(); // id -> { score, item }
-  function feed(finder, weight) {
-    const entries = finder.find(q);
-    for (const e of entries) {
-      const cur = scoreMap.get(e.item.id) || { score: 0, item: e.item };
-      cur.score += weight * e.score;
-      scoreMap.set(e.item.id, cur);
-    }
-  }
-  feed(titleFinder, 4);
-  feed(aliasFinder, 3);
-  feed(tagsFinder, 2);
-  feed(urlFinder, 1);
-
-  const ranked = [...scoreMap.values()].map(({ score, item }) => ({
-    item,
-    score: score + 0.001 * (Number(item.frecency_score) || 0),
-  }));
+  const ranked = scoreBookmarkMatches(q, items, window.fzf).map(
+    ({ score, item }) => ({
+      item,
+      score: score + 0.001 * (Number(item.frecency_score) || 0),
+    }),
+  );
   ranked.sort((a, z) =>
     z.score - a.score ||
     a.item.title.localeCompare(z.item.title) ||
@@ -258,7 +232,12 @@ function render() {
   }
 }
 
-$q.addEventListener("input", () => refresh({ resetSelection: true }));
+$q.addEventListener("input", () => {
+  refresh({ resetSelection: true });
+  // A new query selects the best match, so it must also reveal the top of the
+  // new result set instead of preserving an unrelated prior scroll position.
+  $list.scrollTop = 0;
+});
 
 function selectedIndex() {
   return state.view.findIndex((bookmark) => bookmark.id === state.selectedId);

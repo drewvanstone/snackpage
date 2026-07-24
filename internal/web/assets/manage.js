@@ -8,6 +8,7 @@
 // normal mode automatically.
 
 import { openThemePicker } from "./theme.js";
+import { scoreBookmarkMatches } from "./search.js";
 
 const FIELDS = ["title", "url", "tags", "aliases"];
 const MAX_COL = FIELDS.length - 1; // 0..3
@@ -866,29 +867,9 @@ function applyFilter() {
   }
   const views = rows.map((tr) => viewByRow.get(tr));
 
-  let matchedSet;
-  if (!F) {
-    const ql = q.toLowerCase();
-    matchedSet = new Set(
-      views.filter(
-        (v) =>
-          v.title.toLowerCase().includes(ql) ||
-          v.url.toLowerCase().includes(ql) ||
-          v.tags.toLowerCase().includes(ql) ||
-          v.aliases.toLowerCase().includes(ql),
-      ),
-    );
-  } else {
-    const matched = new Set();
-    for (const field of FIELDS) {
-      const finder = new F.Fzf(views, { selector: (v) => v[field] });
-      const entries = finder.find(q);
-      for (const e of entries) {
-        if (e.score > 0) matched.add(e.item);
-      }
-    }
-    matchedSet = matched;
-  }
+  const matchedSet = new Set(
+    scoreBookmarkMatches(q, views, F).map((match) => match.item),
+  );
 
   for (const tr of rows) {
     const v = viewByRow.get(tr);

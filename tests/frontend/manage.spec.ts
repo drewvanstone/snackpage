@@ -122,6 +122,111 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     ).toBeTruthy();
   });
 
+  test("filter excludes weak scattered fuzzy matches", async ({ page }) => {
+    const bookmarks = [
+      {
+        id: "50000001",
+        title: "Mistral Console",
+        url: "https://console.example.test",
+        tags: [],
+        aliases: [],
+      },
+      {
+        id: "50000002",
+        title: "Team Runbook",
+        url: "https://runbook.example.test",
+        tags: ["mistral"],
+        aliases: [],
+      },
+      {
+        id: "50000003",
+        title: "AI Workspace",
+        url: "https://workspace.example.test",
+        tags: [],
+        aliases: ["mistral"],
+      },
+      {
+        id: "50000004",
+        title: "Vendor Portal",
+        url: "https://mistral-console.example.test",
+        tags: [],
+        aliases: [],
+      },
+      {
+        id: "50000005",
+        title: "Management Infrastructure Portal",
+        url: "https://docs.example.test/platform",
+        tags: [],
+        aliases: [],
+      },
+      {
+        id: "50000007",
+        title: "NovaLearn",
+        url: "https://novalearn.example.test",
+        tags: [],
+        aliases: [],
+      },
+      {
+        id: "50000008",
+        title: "People Portal",
+        url: "https://nova.example.test/resources/Learning_Development",
+        tags: [],
+        aliases: [],
+      },
+      {
+        id: "50000006",
+        title: "Learning Portal",
+        url: "https://example.test/management/instructions/material",
+        tags: [],
+        aliases: [],
+      },
+    ];
+    await page.route("**/api/bookmarks", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ bookmarks }),
+      }),
+    );
+    await page.goto("/manage");
+
+    const visibleTitles = async () =>
+      page
+        .locator('#rows tr:not([hidden]) input[data-field="title"]')
+        .evaluateAll((inputs) =>
+          inputs.map((input) => (input as HTMLInputElement).value),
+        );
+
+    await page.locator("#filter").fill("mistral");
+    await expect.poll(visibleTitles).toEqual([
+      "Mistral Console",
+      "Team Runbook",
+      "AI Workspace",
+      "Vendor Portal",
+    ]);
+
+    await page.locator("#filter").fill("mstral");
+    await expect.poll(visibleTitles).toEqual([
+      "Mistral Console",
+      "Team Runbook",
+      "AI Workspace",
+      "Vendor Portal",
+    ]);
+
+    await page.locator("#filter").fill("MISTRAL");
+    await expect.poll(visibleTitles).toEqual([
+      "Mistral Console",
+      "Team Runbook",
+      "AI Workspace",
+      "Vendor Portal",
+    ]);
+
+    await page.locator("#filter").fill("novalearn");
+    await expect.poll(visibleTitles).toEqual(["NovaLearn"]);
+
+    await page.locator("#filter").fill("novalern");
+    await expect.poll(visibleTitles).toEqual(["NovaLearn"]);
+  });
+
   test("clearing filter restores all rows visible", async ({ page }) => {
     // Snapshot the total before filtering. The server is shared across the
     // full Playwright run, so previous tests (modal add, dd-delete, etc.)

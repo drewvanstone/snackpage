@@ -145,7 +145,13 @@ The picker has two modes:
 
 An empty query hides the result list; snackpage is a launcher, not a bookmark
 browser. Matching covers title, aliases, tags, and URL. Fuzzy match quality is
-primary, with server-computed frecency and alphabetical title used for stable
+primary, but loose character sequences scattered through unrelated text are
+discarded. Literal substrings lead the results and may be joined by close
+matches in intentionally curated aliases and tags. With no literals, search
+falls back to human-readable acronyms and then close omitted-character
+matches. URL fuzziness stays within one hostname label; paths and query strings
+must match literally, so unrelated URL components cannot combine into a
+result. Server-computed frecency and alphabetical title provide stable
 tie-breaking. Hovering a result moves the active selection and clicking it
 opens the bookmark; the footer shows the version served by the running binary.
 
@@ -183,7 +189,8 @@ Open `http://127.0.0.1:8765/manage` for a spreadsheet-style view.
 - Click or tab into a cell to edit it. Blur saves automatically.
 - `Enter` saves and moves to the same column in the next row.
 - `Esc` reverts the current cell and returns to normal mode.
-- The filter fuzzy-matches title, URL, tags, and aliases.
+- The filter uses the picker's relevance rules across title, URL, tags, and
+  aliases.
 - `+ Add` inserts a draft row.
 - The delete button requires a second click within two seconds; `d d` is the
   keyboard confirmation.
