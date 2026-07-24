@@ -454,13 +454,23 @@ test.describe("snackpage /manage — mutation stabilization", () => {
     const suffix = Date.now();
     const title = `Unknown Draft ${suffix}`;
     let posts = 0;
+    let releasePost!: () => void;
+    let markPostStarted!: () => void;
+    const postStarted = new Promise<void>((resolve) => {
+      markPostStarted = resolve;
+    });
+    const postMayFinish = new Promise<void>((resolve) => {
+      releasePost = resolve;
+    });
     await page.route("**/api/bookmarks", async (route) => {
       if (route.request().method() !== "POST") {
         await route.continue();
         return;
       }
       posts += 1;
+      markPostStarted();
       await route.fetch();
+      await postMayFinish;
       await route.fulfill({
         status: 201,
         contentType: "application/json",
@@ -476,6 +486,8 @@ test.describe("snackpage /manage — mutation stabilization", () => {
     await draft.locator('input[data-field="tags"]').fill(`unknown-${suffix}`);
     await draft.locator('input[data-field="aliases"]').fill("queued");
     await page.locator("#filter").focus();
+    await postStarted;
+    releasePost();
 
     await expect(draft).toHaveAttribute("data-outcome-unknown", "true");
     await expect(draft.locator("input").first()).toHaveAttribute("readonly", "");
