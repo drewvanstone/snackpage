@@ -20,7 +20,10 @@
     <div class="footer">
       <span id="count"></span>
       <span id="hints" class="hints">↑↓ select · ⏎ open · ⎋ normal mode</span>
-      <a href="/manage" class="cross-link">manage</a>
+      <span class="footer-meta">
+        <a href="/manage" class="cross-link">manage</a>
+        {{if .Version}}<span class="app-version">version {{.Version}}</span>{{end}}
+      </span>
     </div>
     <div id="status" class="status" role="status" aria-live="polite" hidden></div>
   </main>

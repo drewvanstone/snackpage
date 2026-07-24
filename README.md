@@ -146,7 +146,8 @@ The picker has two modes:
 An empty query hides the result list; snackpage is a launcher, not a bookmark
 browser. Matching covers title, aliases, tags, and URL. Fuzzy match quality is
 primary, with server-computed frecency and alphabetical title used for stable
-tie-breaking.
+tie-breaking. Hovering a result moves the active selection and clicking it
+opens the bookmark; the footer shows the version served by the running binary.
 
 ### Picker keyboard map
 

@@ -119,6 +119,23 @@ body {
   font-size: 0.72rem;
 }
 
+.hints {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
 /* Discreet cross-link between picker and manage views. Same low-emphasis
    color as the rest of the footer; underline on hover only. */
 .cross-link {
@@ -127,6 +144,11 @@ body {
   border-bottom: 1px dotted var(--overlay0);
 }
 .cross-link:hover { color: var(--mauve); border-bottom-color: var(--mauve); }
+
+.app-version {
+  color: var(--text);
+  user-select: none;
+}
 
 .status {
   margin-top: 0.6rem;

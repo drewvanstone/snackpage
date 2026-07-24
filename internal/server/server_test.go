@@ -182,6 +182,9 @@ func TestIndex_VersionStamp(t *testing.T) {
 	if !strings.Contains(string(body), `/static/app.js?v=v1.2.3`) {
 		t.Errorf("index missing versioned app.js; body:\n%s", body)
 	}
+	if !strings.Contains(string(body), `class="app-version">version v1.2.3</span>`) {
+		t.Errorf("index missing visible version; body:\n%s", body)
+	}
 }
 
 // Without a version (e.g. `go run` builds where ldflags didn't fire), the
@@ -202,6 +205,9 @@ func TestIndex_NoVersionStamp(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `/static/app.js"`) {
 		t.Errorf("index missing bare app.js script tag; body:\n%s", body)
+	}
+	if strings.Contains(string(body), `class="app-version"`) {
+		t.Errorf("index displays an empty version marker; body:\n%s", body)
 	}
 }
 

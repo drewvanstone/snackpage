@@ -268,6 +268,17 @@ function selectedBookmark() {
   return state.view.find((bookmark) => bookmark.id === state.selectedId);
 }
 
+function selectRenderedRow(li) {
+  const id = li.dataset.id;
+  if (!id) return false;
+  state.selectedId = id;
+  for (const row of $list.querySelectorAll(".row")) {
+    row.setAttribute("aria-selected", row === li ? "true" : "false");
+  }
+  $q.setAttribute("aria-activedescendant", `bookmark-option-${id}`);
+  return true;
+}
+
 function mutationsAllowed() {
   if (!state.mutationBlocked) return true;
   setStatus(
@@ -560,12 +571,22 @@ document.addEventListener("keydown", (e) => {
   // Everything else in insert mode falls through to the input element.
 });
 
-// Click-to-select on rows
+// Pointer selection mirrors keyboard selection. Update the existing DOM
+// instead of re-rendering it so moving onto a row cannot replace the click
+// target between hover and click (notably in Safari).
+$list.addEventListener("pointerover", (e) => {
+  const li = e.target instanceof Element ? e.target.closest(".row") : null;
+  if (li) selectRenderedRow(li);
+});
+
+// A primary click opens the row under the pointer. Cmd/Ctrl-click preserves
+// the keyboard shortcut's open-in-new-tab behavior.
 $list.addEventListener("click", (e) => {
-  const li = e.target.closest(".row");
+  const li = e.target instanceof Element ? e.target.closest(".row") : null;
   if (!li) return;
-  state.selectedId = li.dataset.id || null;
-  render();
+  if (!selectRenderedRow(li)) return;
+  e.preventDefault();
+  openSelected(e.metaKey || e.ctrlKey);
 });
 
 load({ preserveSelection: false });
