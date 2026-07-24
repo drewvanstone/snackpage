@@ -13,11 +13,12 @@ func TestStore_AddListVisitDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 
 	bm, err := s.Add(store.Bookmark{
 		Title:   "Team Dashboard",
 		URL:     "https://example.com/board",
-		Tags:    []string{"work", "Work", "jira"},   // dup + case
+		Tags:    []string{"work", "Work", "jira"}, // dup + case
 		Aliases: []string{"team board", "Sprint Board"},
 	})
 	if err != nil {
@@ -61,6 +62,7 @@ func TestStore_AddListVisitDelete(t *testing.T) {
 func TestStore_RejectsInvalid(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := store.New(dir)
+	t.Cleanup(func() { _ = s.Close() })
 
 	cases := []struct {
 		name string
@@ -82,6 +84,7 @@ func TestStore_RejectsInvalid(t *testing.T) {
 func TestStore_AutoPrependsHTTPS(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := store.New(dir)
+	t.Cleanup(func() { _ = s.Close() })
 
 	cases := []struct {
 		name  string
@@ -110,6 +113,7 @@ func TestStore_AutoPrependsHTTPS(t *testing.T) {
 func TestStore_Update(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := store.New(dir)
+	t.Cleanup(func() { _ = s.Close() })
 
 	bm, _ := s.Add(store.Bookmark{Title: "old", URL: "https://example.com"})
 
@@ -133,11 +137,15 @@ func TestStore_PersistsAcrossRestart(t *testing.T) {
 
 	s1, _ := store.New(dir)
 	bm, _ := s1.Add(store.Bookmark{Title: "x", URL: "https://example.com"})
+	if err := s1.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	s2, err := store.New(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = s2.Close() })
 	bms, _ := s2.List()
 	if len(bms) != 1 || bms[0].ID != bm.ID {
 		t.Errorf("did not persist; got %+v", bms)

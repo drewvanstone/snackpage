@@ -1,236 +1,458 @@
 # snackpage architecture
 
-Living architectural reference. Updated whenever the structure shifts. For *feature* roadmap, see [`docs/superpowers/specs/2026-05-23-snackpage-design.md`](docs/superpowers/specs/2026-05-23-snackpage-design.md) §10.
+This is the current architectural reference. The documents under
+`docs/superpowers/` are historical design and implementation records.
 
-## 1. Identity
+## 1. Product boundary
 
-**snackpage is a personal bookmark datastore** that ships with a fuzzy-finder frontend.
+snackpage is a personal bookmark datastore with two browser views:
 
-This framing matters because it determines what's in the *core* and what's a *frontend*:
+- `/` is the fast, keyboard-driven fuzzy picker.
+- `/manage` is the spreadsheet-style maintenance view.
 
-- The **core** owns the truth: a JSON-backed, version-headered, atomically-written bookmark library plus visit-count statistics. It exposes a stable HTTP and Go API.
-- **Frontends** are downstream consumers. Today there's one: a snacks.nvim-style fuzzy picker served at `/`. Future frontends could include a Bubbletea TUI, alternative web layouts (compact vs detailed), a Chromium companion extension that mirrors the store into the browser's native bookmark UI (see spec §10.v4), or a Go SDK.
+The bookmark library is canonical; both web views and the CLI are clients of
+the same application boundary. The process is deliberately local and
+single-user:
 
-The implication: **changes to the bookmark domain ripple to every frontend, so the domain stays small, well-named, and stable. Changes to a single frontend are local.**
+- one Go binary;
+- one file-backed store;
+- one embedded vanilla-JavaScript frontend;
+- loopback HTTP only;
+- no authentication, TLS, CORS, cloud service, runtime CDN, or telemetry;
+- macOS and Linux support; Windows is outside the supported matrix.
 
-## 2. Design principles
+The project stays stdlib-first. Go has no third-party runtime dependency. The
+frontend's only runtime dependency is a vendored `fzf-for-js` file.
 
-- **Stdlib first.** stdlib `net/http`, `log/slog`, `embed`, `flag`. The only Go third-party in `go.sum` is whatever future libraries we add deliberately (currently zero direct deps beyond stdlib). The frontend has one vendored JS library (`fzf-for-js`).
-- **Loopback by default.** Bind to `127.0.0.1`, no auth, no TLS, no CORS. A bookmark service is not a network service.
-- **Files are the API.** `bookmarks.json` is hand-editable, diff-friendly, and git-syncable. Anyone with a text editor can recover from a corrupted state.
-- **Atomic on disk.** Every write is `write-tmp → fsync → rename`. Partial writes don't happen.
-- **Keyboard-driven, modal vim-style.** Insert mode for typing into inputs; normal mode for all commands. Normal-mode commands are vim-vocabulary chords (`a` add, `e` edit, `dd` delete, `gg`/`G` top/bottom). **No `⌘+letter` snackpage shortcuts** — they fight Chrome's hardcoded mappings, feel un-vim, and waste a key space we have no business taking. Reserved modifier shortcuts: `Enter` (open) and `⌘+Enter` (open in new tab) only. Future `<Space>` is the leader prefix for app-extension commands. Same keymap shape applies to picker, manage view, and TUI.
-- **Theming is data.** Today: hardcoded Catppuccin Mocha. Target: base16-style palettes as drop-in files (see §7).
-- **Pure functions where possible.** Frecency scoring, ID generation, atomic write, XDG resolution — all pure or trivially testable.
+## 2. Components and ownership
 
-## 3. File responsibility table
+```text
+cmd/snackpage/
+├── main.go                 process lifecycle, serve, loopback listener
+├── demo.go                 isolated seeded demo server
+├── add.go                  add command and URL normalization
+├── import.go               import dispatcher
+├── import_chrome.go        Chrome parser, preview, atomic batch import
+├── api_client.go           bounded daemon HTTP client and outcome rules
+└── demo_data.go            embedded demo fixture
 
-```
-cmd/snackpage/             CLI entry, one file per subcommand
-├── main.go                Subcommand dispatch, --version, --help, signal handling
-├── add.go                 `snackpage add URL …` — POST to running daemon, fall back to direct
-├── demo.go                `snackpage demo` — ephemeral tempdir with seeded fixture data
-├── demo_data.go           The 100 generic bookmarks the demo seeds
-├── import.go              `snackpage import <source>` dispatcher (currently only `chrome`)
-└── import_chrome.go       Chrome Bookmarks JSON parser + tree walker + profile discovery
+internal/store/
+├── types.go                bookmark, stats, and versioned file shapes
+├── errors.go               typed error categories
+├── id.go                   random Crockford-base32 IDs
+├── atomic.go               durable same-directory atomic replacement
+├── bookmarks.go            strict bookmark schema load/save/validation
+├── state.go                strict statistics schema load/save/validation
+└── store.go                lock-owning snapshot and mutation operations
 
-internal/store/            DOMAIN + APPLICATION + INFRASTRUCTURE for bookmarks
-├── types.go               Bookmark, Stats, BookmarksFile, StateFile (domain entities)
-├── id.go                  NewID() — Crockford base32, crypto/rand, bias-free
-├── frecency.go            (lives in internal/frecency/) — pure scoring function
-├── atomic.go              atomicWriteFile — temp + fsync + rename
-├── bookmarks.go           load/save bookmarks.json with schema version 1
-├── state.go               load/save state.json with schema version 1
-└── store.go               Store facade: New/List/Add/Update/Delete/Visit, RWMutex-guarded
+internal/server/
+├── server.go               routes, embedded assets, cache policy
+├── middleware.go           logging, recovery, Host/Origin/security policy
+├── bookmarks.go            JSON wire types, CRUD, batch, error mapping
+└── redirect.go             bookmark redirect and best-effort visit tracking
 
-internal/frecency/         DOMAIN — pure scoring
-└── frecency.go            Score(visitCount, lastVisitAt, now) → float64
-
-internal/xdg/              INFRASTRUCTURE — path resolution
-└── xdg.go                 DataDir(app) honoring $XDG_DATA_HOME
-
-internal/server/           INTERFACE — HTTP adapter on top of store
-├── server.go              Mux setup, embed.FS subbing, handleIndex/handleHealthz, html/template for ?v= version stamp, Options{Dev,Version} (dev mode wraps /static and HTML in Cache-Control: no-store)
-├── middleware.go          logRequests + recoverPanics
-├── bookmarks.go           bookmarkView + handleListBookmarks/Create/Update/Delete
-└── redirect.go            handleRedirect — /go/:id → 302 + best-effort Visit
-
-internal/web/              INTERFACE — embedded picker frontend (one of N possible frontends)
-├── web.go                 //go:embed assets — exposes FS to the server
+internal/frecency/          pure server-side frecency calculation
+internal/xdg/               XDG data-path resolution
+internal/web/
+├── web.go                  go:embed boundary
 └── assets/
-    ├── index.html         Picker shell: prompt, list, footer, modal-root
-    ├── manage.html        Manage view shell: header, table, modal-root
-    ├── style.css          Structure-only base CSS (layout, sizes, spacing)
-    ├── manage.css         Manage-specific layout (table, cells, cursor)
-    ├── themes/            Built-in theme palettes (18 total; full list in theme.js THEMES)
-    │   ├── catppuccin-mocha.css   Default theme — dark mauve-accented palette
-    │   ├── classic-mac.css        System-6 monochrome (striped titlebar, stippled BG, B&W)
-    │   ├── mono-light.css         Frosted-glass monochrome, IBM Plex Mono (design-driven)
-    │   └── …                      15 more base16/community palettes (catppuccin-latte, dracula, nord, …)
-    ├── theme.js           Runtime theme switcher (currentTheme/setTheme/cycleTheme)
-    ├── app.js             Picker logic: load, render, fuzzy-rank, keymap, modal
-    ├── manage.js          Manage logic: rows, vim-modal cursor, CRUD on blur
-    └── vendor/fzf.umd.min.js   fzf-for-js v0.5.2, vendored
+    ├── index.html          picker document shell
+    ├── manage.html         manage document shell
+    ├── app.js              picker state, ranking, commands, dialogs, undo
+    ├── manage.js           row editor, serialized saves, commands, undo
+    ├── theme-registry.js   immutable list of the 18 valid themes
+    ├── theme-bootstrap.js  validated pre-paint theme resolution
+    ├── theme.js            runtime theme picker
+    ├── style.css           shared structure and components
+    ├── manage.css          table-specific structure
+    ├── themes/             one embedded CSS file per theme
+    └── vendor/             fzf-for-js v0.5.2
 
-scripts/                   Development scripts
-└── e2e.sh                 End-to-end smoke test via curl against a fresh binary
+scripts/
+├── e2e.sh                  isolated real-process HTTP smoke test
+├── release.sh              guarded, restartable release orchestration
+└── update-homebrew-formula.rb
+                            exact Homebrew release-field updater
+tests/frontend/             Playwright browser integration tests
+.github/workflows/ci.yml    macOS/Linux Go and Ubuntu browser/tooling gates
 ```
 
-## 4. Layers
+Dependency direction is simple:
 
-snackpage is small enough that the layers live in adjacent packages rather than separate module roots, but it follows a domain-driven layering:
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  INTERFACES                                                     │
-│    HTTP API (internal/server)   CLI (cmd/snackpage)             │
-│    Picker frontend (internal/web/assets — vanilla JS)           │
-│    Future: Bubbletea TUI, Chromium extension, Go SDK            │
-└──────────────┬──────────────────────────────────────────────────┘
-               │ depends on
-               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  APPLICATION                                                    │
-│    Store (internal/store/store.go)                              │
-│      - Add/Update/Delete/Visit (mutations, validation, locking) │
-│      - List (snapshot read)                                     │
-│      - Atomic persistence orchestration                         │
-└──────────────┬──────────────────────────────────────────────────┘
-               │ depends on
-               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  DOMAIN                                                         │
-│    Entities: Bookmark, Stats, BookmarksFile, StateFile          │
-│    Pure logic: frecency scoring, ID generation, validation      │
-│      (no I/O, no time-of-day dependence, no globals)            │
-└──────────────┬──────────────────────────────────────────────────┘
-               │ persisted by
-               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  INFRASTRUCTURE                                                 │
-│    File I/O (internal/store/{atomic,bookmarks,state}.go)        │
-│    XDG path resolution (internal/xdg)                           │
-│    Embedded assets (internal/web)                               │
-└─────────────────────────────────────────────────────────────────┘
+```text
+HTTP / CLI / web interfaces
+            │
+            ▼
+       store.Store
+            │
+            ▼
+versioned JSON + atomic filesystem operations
 ```
 
-Rules of dependency flow:
-- Domain depends on nothing (pure stdlib only).
-- Application depends on domain + infrastructure (via concrete types — interfaces are introduced when the second adapter materializes).
-- Interfaces depend on application. No interface code reaches into infrastructure directly.
+`internal/frecency` and `internal/xdg` are small pure or nearly-pure support
+packages. HTTP wire types remain separate from store types so API evolution
+does not silently redefine the on-disk schema.
 
-When something feels architecturally fishy, it's almost always a layer violation: an HTTP handler reaching for `os.ReadFile` instead of going through `Store`, or domain code calling `time.Now()` instead of accepting `now` as a parameter.
+## 3. Storage model
 
-## 5. Data flow
+The default data directory is `$XDG_DATA_HOME/snackpage`, falling back to
+`~/.local/share/snackpage`.
 
-### Opening the picker (Cmd+T → http://localhost:8765/)
-
-```
-Browser → server.handleIndex → render internal/web/assets/index.html (html/template)
-                              → script tags get ?v=<build-version> if non-empty
-       → app.js loads, fetches /api/bookmarks
-       → server.handleListBookmarks → store.List() → snapshot (bms, stats)
-       → bookmarkView{} merges stats into wire shape → JSON
-       → app.js renders an EMPTY list (the picker is a launcher, not a browser)
+```text
+.snackpage.lock
+bookmarks.json
+state.json
 ```
 
-### Search → Open
+### Canonical and volatile data
 
-```
-Empty input → render no rows (the picker is a launcher, not a bookmark browser).
-Typed input → fzf-for-js scored ranking across title (weight 4) > aliases (3)
-              > tags (2) > url (1). Frecency adds a small tiebreak nudge.
+`bookmarks.json` is canonical. Schema version 1 stores ordered bookmarks with:
 
-Keystroke → refresh() → fuzzyRank(query, state.bookmarks)
-         → fzf-for-js scores each field (title×4 / aliases×3 / tags×2 / url×1)
-         → frecency tiebreak → render
-
-Enter → openSelected(false) → window.location = /go/:id
-     → server.handleRedirect → store.Visit(id, now) [best-effort]
-                              → 302 → bookmark.URL
+```text
+id, title, url, tags, aliases, created_at
 ```
 
-### Add (in-page modal OR `snackpage add URL`)
+`state.json` is volatile and stores `visit_count` and `last_visit_at` by
+bookmark ID. Losing it affects ranking history, not the bookmark library.
+Orphaned statistics are pruned when a store opens and during relevant later
+mutations.
 
-```
-Modal: ⌘I → openModal → user types → submit
-            → fetch POST /api/bookmarks
-            → server.handleCreateBookmark → store.Add(bm)
-            → store.validateBookmark + normalize tags/aliases
-            → bookmarks slice append (under Lock)
-            → saveBookmarks (atomic write)
-            → reload list, auto-select new row
+Both files are initialized at schema version 1 when missing. Canonical
+bookmarks are decoded strictly: unknown fields, malformed data, duplicate or
+invalid IDs, invalid required fields, and unsupported schema versions cause
+opening the store to fail.
 
-CLI: `snackpage add URL …` → cmd/snackpage/add.go
-     → try POST first (500ms timeout)
-     → on transport failure → fall back to direct store.Add()
-     → on HTTP 4xx/5xx → surface error, do NOT fall back
-```
+State is also decoded strictly, but has a deliberate recovery boundary because
+it is disposable. On a writable `Store.New`, malformed JSON or semantically
+invalid schema-v1 state is copied byte-for-byte with mode `0600` to a unique
+`state.json.recovery-*` sibling, then `state.json` is atomically reset to
+schema v1 with empty stats. Unsupported state schema versions remain untouched
+and cause opening the store to fail. A future schema is never rewritten by an
+older binary.
 
-### Import from Chrome (`snackpage import chrome`)
+### Single writer
 
-```
-runImport → runImportChrome → resolve --profile → Bookmarks file path
-         → on ENOENT for --profile → listChromeProfiles → friendly error
-         → parse JSON tree → walk → flatten with immediate-parent tag
-         → store.New → dedupe against existing → store.Add per candidate
-         → report counts
-```
+`store.New` creates the directory, obtains an exclusive non-blocking
+`.snackpage.lock` with `flock`, loads and validates both files, initializes
+missing files, and retains the lock until `Store.Close`.
 
-## 6. Concurrency & consistency
+This makes the daemon the sole writer while it runs. Offline CLI mutations use
+the same constructor and therefore fail safely if the daemon owns that data
+directory. `LoadSnapshot` is the explicit non-creating, non-locking read path
+for dry runs. It treats invalid current-version state as empty in memory and
+never creates a recovery file or changes the source; future versions still
+return an error.
 
-- `Store` is the single owner of in-memory bookmark and stats state. Guarded by one `sync.RWMutex`.
-- `List` takes RLock and returns a deep-copied slice + map — callers cannot mutate the live state.
-- `Add` / `Update` / `Delete` / `Visit` take Lock. They mutate in-memory state, then call `saveBookmarks` and/or `saveState` (each does its own `atomicWriteFile`).
-- Persistence is `bookmarks.json` (canonical, ordered) and `state.json` (volatile, map-keyed). They live next to each other under `$XDG_DATA_HOME/snackpage/`.
-- On any save failure inside Add/Update, the in-memory change rolls back. (Delete has a known two-file rollback gap when `saveState` fails after `saveBookmarks` succeeds — see spec §11 carryover items.)
-- The HTTP server is **not** the source of truth for `state.json` order — multiple snackpage tabs can have stale views; reloading fetches the truth.
+The lock handles cooperating snackpage processes. A SHA-256 fingerprint of
+`bookmarks.json` handles non-cooperating external writers: every canonical
+mutation verifies that the published file still matches the snapshot. If a
+text editor or sync tool replaced it, the mutation returns
+`ErrExternalChange` rather than overwriting the external data. Recovery is to
+close the process, inspect the file, and reopen it; there is intentionally no
+live merge.
 
-## 7. Extension points
+### In-process consistency
 
-Where to plug in new behavior:
+One `sync.RWMutex` protects a store's complete bookmark/statistics snapshot.
+`List` deep-copies bookmarks, tags, aliases, and statistics, so clients cannot
+mutate live state through returned slices or maps.
 
-| Want to add… | Touch | Don't touch |
+Canonical mutations are copy-on-write:
+
+1. validate and normalize input;
+2. clone the current snapshot;
+3. apply the mutation to the clone;
+4. verify the canonical file fingerprint;
+5. persist the clone;
+6. publish the new in-memory snapshot.
+
+A canonical save failure therefore leaves both the published file and live
+snapshot unchanged. `AddBatch` validates the entire request, removes duplicate
+URLs, assigns collision-checked IDs, and publishes all created bookmarks with
+one canonical write.
+
+Deleting a bookmark persists the canonical deletion first, then prunes state
+best-effort. Redirect tracking also treats state persistence as best-effort so
+a statistics failure never blocks navigation.
+
+### Durable replacement
+
+Every JSON save:
+
+1. creates a uniquely named temporary file in the target directory;
+2. applies mode `0600`;
+3. writes and `fsync`s the temporary file;
+4. closes it;
+5. atomically renames it over the destination;
+6. `fsync`s the parent directory.
+
+The data directory is created with mode `0700`. Same-directory rename is the
+atomic publication point. A post-rename directory-sync or close failure is
+logged as a crash-durability warning, but the mutation remains a logical
+success: returning a normal error after publication would invite a replay that
+could duplicate the operation.
+
+### Bookmark normalization
+
+- title and URL are trimmed and required;
+- a URL without `://` receives `https://`;
+- the parsed URL must contain a scheme and host;
+- the project intentionally preserves the existing scheme policy rather than
+  imposing an HTTP/HTTPS allowlist;
+- tags are trimmed, lowercased, deduplicated, and sorted;
+- aliases are trimmed and deduplicated case-insensitively while preserving the
+  first spelling;
+- IDs are eight-character Crockford base32 and generated until unique;
+- `created_at` is assigned by the store and preserved by updates.
+
+## 4. HTTP boundary
+
+The daemon uses Go's method-aware `http.ServeMux`.
+
+| Method | Path | Result |
 |---|---|---|
-| **New CLI subcommand** | `cmd/snackpage/<new>.go` + register in `main.go` switch + `printUsage` line | `internal/*` |
-| **New HTTP route** | `internal/server/<area>.go` + register in `server.go`'s `Handler()` | `internal/store` (unless you genuinely need new domain ops) |
-| **New bookmark field** | `internal/store/types.go` (struct + JSON tag), `validateBookmark` if validated, JS render in `app.js`, modal in `app.js`, server wire shape in `internal/server/bookmarks.go` | `internal/frecency` (purely score, doesn't see fields) |
-| **New picker layout (compact / detailed)** | `internal/web/assets/style.css` + a layout-switcher hook in `app.js` reading from a future user-config file | The HTML structure shouldn't need changing for layout-only switches |
-| **New theme** | Add `internal/web/assets/themes/<name>.css` and append an entry (`{id, name, description}`) to the `THEMES` array in `theme.js`. The CSS overrides Catppuccin var names (`--base`, `--mauve`, …) under a `[data-theme="<name>"]` selector and can layer on pseudo-element decorations (titlebar, mode chip, etc.). The inline `<head>` bootstrap resolves the active theme before paint; runtime swaps go through the `<Space>t` theme picker (with live preview). User themes from `$XDG_CONFIG_HOME/snackpage/themes/` remain a future addition (see §8). | The HTML structure or JS render — themes are purely CSS. |
-| **Alternative frontend** (e.g. Bubbletea TUI) | New package under `internal/`, new subcommand under `cmd/snackpage/` that boots it, all reading from `store.Store` directly | Existing frontends should be untouched. |
-| **New storage backend** (e.g. SQLite) | Introduce a `store.Repository` interface in domain, move file-backed code to `internal/store/file`, add `internal/store/sqlite` adapter. Today the interface is implicit because we have one adapter. | Defer interface extraction until the second adapter is real (YAGNI). |
+| `GET` | `/` | Picker HTML |
+| `GET` | `/manage` | Manage HTML |
+| `GET` | `/static/*` | Embedded asset |
+| `GET` | `/healthz` | Plain-text liveness |
+| `GET` | `/api/bookmarks` | Bookmarks merged with stats and `frecency_score` |
+| `POST` | `/api/bookmarks` | Create one bookmark |
+| `POST` | `/api/bookmarks/batch` | Atomically create a deduplicated batch |
+| `PUT` | `/api/bookmarks/{id}` | Replace editable fields |
+| `DELETE` | `/api/bookmarks/{id}` | Delete bookmark |
+| `GET` | `/go/{id}` | `302` redirect and best-effort visit |
 
-## 8. Future directions
+The batch body is:
 
-Aligned with Drew's vision for the project. Not committed roadmap (that's the spec); just architectural pointers.
+```json
+{
+  "bookmarks": [
+    {"title": "Example", "url": "example.com", "tags": [], "aliases": []}
+  ],
+  "skip_existing_urls": true
+}
+```
 
-**Base16-style theming.** Shipped in v1.7 (two built-in themes), expanded in v1.8 to 17, and now at 18 total: three design-driven themes (`catppuccin-mocha` default, `classic-mac`, `mono-light`) plus 15 base16/community palettes — Dracula, Gruvbox Dark Medium, Nord, Tokyo Night, One Dark, Solarized (Dark + Light), Tomorrow Night, Monokai, Rose Pine, Everforest Dark, Kanagawa, GitHub (Dark + Light), and Catppuccin Latte. Each theme is a single CSS file under `internal/web/assets/themes/` that overrides `--base` / `--mauve` / etc. CSS variables under a `[data-theme="<name>"]` selector, and can layer on pseudo-element decorations (e.g. classic-mac's striped titlebar, stippled desktop, mode chip). The base `style.css` is structure-only and references only variables. An inline `<head>` bootstrap resolves the active theme before paint (URL param > localStorage > default), and `theme.js` exposes a modal `openThemePicker()` for runtime swaps via `<Space>t` — j/k navigates with live preview, Enter commits to localStorage, Esc reverts. (The legacy `cycleTheme()` is still exported for future tooling.) The proper base16 variable-name refactor (`--base00..--base0F` + semantic aliases) is still future work — today's themes override the Catppuccin-flavored variable names. User themes from `$XDG_CONFIG_HOME/snackpage/themes/<name>.css` also remain a future addition. References: [base16 spec](https://github.com/chriskempson/base16), [Catppuccin's base16 ports](https://github.com/catppuccin/base16).
+The success response contains `created` and `skipped_existing`. Validation is
+all-or-nothing and canonical persistence occurs once.
 
-**Layout configuration.** Two-line stacked (current) is one option. Compact (single-line dense) and detailed (more metadata visible) are obvious siblings. Mechanism: a small `$XDG_CONFIG_HOME/snackpage/config.toml` (or `config.json` to avoid adding a TOML dep) with keys like `layout = "compact" | "detailed"`, `font_size = "sm" | "md" | "lg"`, `theme = "catppuccin-mocha"`. The server reads it at startup, includes it in the index.html as a `data-*` attribute or inline JS variable, the frontend reacts. Frontend layout switching is pure CSS; no new render logic needed.
+Mutation bodies must be `application/json`, are limited to 1 MiB, reject
+unknown fields, and must contain exactly one JSON value. Typed store errors
+map to stable HTTP categories:
 
-**Bubbletea TUI.** A `snackpage tui` subcommand that boots a terminal picker reading from the same `store.Store`. Same fuzzy ranking, same keymap intent, no web server required. This is where Bubbletea would land. Keyboard discipline (modal editing, mode indicator) transfers directly from the web picker's vim-style modal design.
+- validation → `400`;
+- missing ID → `404`;
+- external canonical change or unsupported schema → `409`;
+- locked store → `423`;
+- persistence or unexpected failure → `500`.
 
-**Multiple browsers as views.** Spec §10.v4 — snackpage exports to (or live-syncs into) each browser's native bookmark UI. Each browser is a read-only mirror; snackpage stays canonical. Six tiers from `snackpage export html` through Chromium companion extension to Safari support.
+`HEAD /go/{id}` can receive redirect metadata through Go's GET-pattern
+semantics but never records a visit. Only a real GET navigation changes
+statistics.
 
-**Eventually: a Go SDK.** Once `internal/store` stabilizes, lifting `Store` to `pkg/store` (with a documented API) lets other Go programs embed snackpage's library directly. Useful if a Drew-flavored alternative frontend wants direct access without going through HTTP.
+### Local security
 
-## 9. Conventions
+Safety is layered even though the service is local:
 
-- **Error messages start with the subcommand name** (`snackpage add: not a valid URL`). Greppable, stable, identifies the source for users debugging via shell history.
-- **Wrapping with `fmt.Errorf("...: %w", err)`** at every layer transition (file I/O → store → handler). Callers can `errors.Is`/`errors.As`.
-- **JSON wire shapes** are separate from domain types: handlers map `store.Bookmark` → `bookmarkView` for output and `bookmarkInput` → `store.Bookmark` for input. This isolates the wire format from internal evolution.
-- **HTTP routes** follow the resource-collection conventions of Go 1.22's `net/http` pattern matching: `GET /api/bookmarks`, `POST /api/bookmarks`, `PUT /api/bookmarks/{id}`, `DELETE /api/bookmarks/{id}`. Future routes use the same shape.
-- **Subcommand commit prefix:** `feat(cmd):`, `fix(cmd):`, `feat(server):`, `feat(web):`, `feat(store):`, `docs:`, `test:`, `vendor:`, `chore:`. Conventional Commits, scope follows the directory.
-- **No global mutable state** inside the binary. The CLI passes `*store.Store` and `*slog.Logger` through `server.New`; tests construct their own.
-- **Tests are colocated** (`foo_test.go` next to `foo.go`). External test packages (`package store_test`) for testing the public API; internal (`package store`) for testing unexported helpers.
+- `serve` and `demo` validate and bind only loopback addresses;
+- request `Host` must identify localhost or a loopback IP;
+- browser mutation requests with an `Origin` must match the request scheme,
+  host, and port;
+- CORS is absent;
+- strict CSP permits only embedded same-origin assets and forbids framing,
+  objects, inline script, and external font/style/script fetches;
+- COOP, Permissions-Policy, Referrer-Policy, frame, and MIME-sniffing headers
+  are set;
+- header, read, write, idle, and graceful-shutdown timeouts are bounded;
+- listener failures reach the main return path and produce a nonzero exit.
 
-## 10. Things that look weird and aren't
+HTML, health, API, and redirect responses use `Cache-Control: no-store`.
+Redirects must reach the daemon on every navigation so a cached `302` cannot
+bypass visit tracking. Production static assets may be retained only with
+revalidation and carry the binary version in their document URLs. Dev mode
+uses `no-store` for static assets as well.
 
-A short list of "I'd refactor that" instincts that aren't actually bugs:
+## 5. CLI mutation semantics
 
-- **`store.normalizeTags` lowercases AND sorts; `normalizeAliases` only dedupes case-insensitively but preserves case.** Tags are categorical (sort = predictable display); aliases are search keys (case preserved for user intent).
-- **`store.Update` silently overwrites `ID` and `CreatedAt` from the input.** This is correct — a client can't change identity. Documented in the doc comment.
-- **`bookmarkView` embeds `store.Bookmark`.** The JSON tag on the embedded struct's fields gets promoted to the top level, giving us `{id, title, url, ..., visit_count, last_visit_at}` without re-declaring fields. Idiomatic Go.
-- **Frecency formula is duplicated in `internal/frecency/frecency.go` (Go) and `internal/web/assets/app.js` (JS).** Deliberate. The picker filters and sorts in the browser without round-tripping through the server.
-- **`internal/web/assets/` instead of `web/` at the project root.** `//go:embed` can't traverse `..` so the embed source has to live next to the package that does the embedding.
-- **`cmd/snackpage/add.go` has a `splitFlagsAndPositionals` helper.** Stock `flag` stops at the first non-flag token, so `snackpage add https://… --title T` would be misread. The helper pre-partitions args. Note: the helper's known-flag whitelist is currently hardcoded (carryover item — should switch to `fs.VisitAll` discovery).
+`snackpage add` and `snackpage import chrome` are API-first. They contact the
+configured loopback daemon and use its single live store.
+
+Automatic direct-write fallback is deliberately narrow: it happens only when
+the operating system reports a definitive connection refusal. An HTTP error,
+timeout, reset, oversized response, read error, or malformed successful
+response can follow a committed mutation, so the client reports an unknown
+outcome and never retries it directly.
+
+`--offline` explicitly bypasses HTTP but still must acquire the store lock.
+Both commands accept `--addr`; direct paths accept `--data-dir`.
+
+Chrome import parses and filters first, normalizes valid entries, then uses the
+batch API or `Store.AddBatch`. Existing URLs and duplicates within the source
+are skipped. `--dry-run` reads through the daemon when available or through
+`LoadSnapshot`; it does not create the data directory or JSON files.
+
+## 6. Frontend model
+
+The runtime frontend has no npm dependency and no compilation step. HTML,
+JavaScript, CSS, theme files, and `fzf-for-js` are embedded in the binary.
+Node and Playwright are development-only browser-test dependencies.
+
+### Picker
+
+The picker fetches the bookmark view into memory. Typing builds weighted fzf
+scores:
+
+```text
+title × 4 + aliases × 3 + tags × 2 + URL × 1
+```
+
+Server-computed `frecency_score` is a small tie-breaker, followed by title, URL,
+and ID for deterministic order. The browser does not duplicate the frecency
+formula. An empty query deliberately renders no results.
+
+Selection is tracked by bookmark ID, not array index. A new query selects the
+top match; reloads preserve the same visible ID when possible. Page focus and
+`pageshow` refresh statistics after returning from a navigation.
+
+### Manage view
+
+All manage writes pass through one mutation scheduler. Rows additionally
+serialize their own create/update work so blur events cannot reorder writes,
+duplicate a draft creation, or allow an older response to overwrite a newer
+edit. Explicit delete/undo actions first drain observed row saves and
+temporarily lock mutation controls; an undo reload therefore cannot discard an
+edit against a row node it replaces. Successful server-normalized values
+replace local values, the active filter is reapplied after mutations, and
+failures stay visible.
+
+Mode follows actual focused elements. Keyboard-driven blur/save/navigation
+transitions mode synchronously so a delayed request cannot leave a focused
+editor in normal mode.
+
+### Dialogs, undo, and accessibility
+
+Dialogs are named, trap focus, guard duplicate submission, and restore the
+element that opened them. Picker results and theme choices use appropriate
+combobox/listbox/option relationships. Editable controls and actions have
+labels and native keyboard behavior.
+
+Undo stacks are per-page and in memory. A failed undo is placed back on the
+stack. Recreating a deleted bookmark produces a new ID, and older undo entries
+are rekeyed so composed undo operations continue to address the restored
+bookmark.
+
+Picker mutations are single-flight. A transport failure or an unreadable
+successful mutation response has an unknown outcome, so both views block
+further mutations until a full reload instead of risking a duplicate retry.
+
+### Themes
+
+`theme-registry.js` is the single allowlist. `theme-bootstrap.js` validates URL
+and local-storage input and applies an embedded stylesheet before first paint,
+without CSP-unsafe inline script. `theme.js` owns live preview and commit.
+Opening and closing the picker installs and removes its listeners; repeated
+use does not accumulate handlers. All 18 themes are local, including their
+font stacks.
+
+## 7. Principal data flows
+
+### Page load and search
+
+```text
+browser GET /
+  → rendered embedded HTML with versioned asset URLs
+  → GET /api/bookmarks
+  → Store.List deep snapshot
+  → server merges stats + computes frecency
+  → browser filters locally with fzf
+```
+
+### Open
+
+```text
+Enter on selected ID
+  → GET /go/{id}
+  → find bookmark in Store snapshot
+  → best-effort Store.Visit
+  → 302 to bookmark URL
+```
+
+### Browser mutation
+
+```text
+validated dialog/cell values
+  → strict JSON request
+  → typed store operation
+  → copy-on-write + fingerprint check + durable replacement
+  → normalized server response
+  → frontend state/render update
+```
+
+### Chrome import
+
+```text
+parse Chrome tree
+  → select optional folder
+  → normalize and discard invalid candidates
+  → daemon batch request
+      or locked offline AddBatch after definitive refusal / --offline
+  → one canonical publication
+```
+
+## 8. Testing and release gates
+
+- `go test ./... -race -cover` covers unit and HTTP integration behavior.
+- `go vet` and `golangci-lint` are both mandatory; missing lint tooling is an
+  error rather than a skipped check.
+- `make format-check` fails on any `gofmt -s` difference.
+- `scripts/e2e.sh` selects a free port, polls liveness while verifying the
+  child remains alive, performs real CRUD and GET redirect traffic, and stops
+  only its own child.
+- The complete Playwright suite runs serially in Chromium to isolate mutating
+  fixtures.
+- Read-only smoke coverage runs in Firefox and WebKit.
+- Concurrent Playwright invocations choose collision-resistant per-process
+  server ports and artifact directories; `SNACKPAGE_PLAYWRIGHT_PORT` is the
+  explicit debugging override.
+- CI runs race-enabled Go tests on current Go 1.26 patch releases on macOS and
+  Linux. Ubuntu also runs formatting, lint, HTTP E2E, and browser jobs.
+- `make release` requires clean source and tap checkouts, runs every local gate
+  before publication, then publishes an annotated Git tag and GitHub release.
+  It selects the next minor version after the latest stable tag published on
+  `origin` by default; `VERSION=X.Y.Z` overrides that choice. The Homebrew
+  formula is derived from the published tag archive and its SHA-256 before the
+  tap is committed. Repository-local locks serialize release runs, and a new
+  release must descend from and differ from the latest published stable tag.
+- Release stages are restartable. Existing tag, GitHub release, and tap stages
+  are accepted only when they resolve to the requested commit, version, URL,
+  and checksum. An in-progress version-and-commit marker under `.git` prevents
+  an automatic retry from selecting a second version or different source
+  commit. The source checkout must remain at that commit until every stage
+  completes.
+
+Node 24 LTS is pinned in `.nvmrc`; Playwright is exact-pinned in
+`tests/frontend/package-lock.json`. Setup uses `npm ci`, and execution uses
+only the locally installed Playwright binary.
+
+## 9. Change rules
+
+- Keep bookmark domain changes in `internal/store`; adapters translate at
+  their boundaries.
+- Add an interface only when a real second implementation needs it.
+- Preserve typed errors across layers with `%w`; do not branch on error text.
+- Pass time into pure domain functions.
+- Route every JSON publication through `atomicWriteFile`.
+- Any direct-write command must participate in the lifetime store lock.
+- Do not add a network bind beyond loopback without redesigning authentication
+  and transport security first.
+- A new embedded JavaScript dependency requires a version, integrity record,
+  and complete license attribution in `NOTICE`.
+- A new theme adds one embedded CSS file and one entry to the validated shared
+  registry.
+- Update this file and the user-facing README when behavior or invariants
+  change.
+
+Deferred features include service/autostart installers, new import sources,
+live synchronization/conflict merging, custom user themes, a TUI, alternate
+storage engines, and first-party browser extensions. They are not assumptions
+inside the current architecture.

@@ -18,13 +18,18 @@ const state = {
   mode: "insert",           // "insert" | "normal"
   normalRow: 0,             // index into the currently visible row set
   normalCol: 0,             // 0..MAX_COL
+  mutationBlocked: false,
+  mutationInFlight: false,
   // In-memory undo stack — same shape as the picker's. Per-view; refreshing
   // /manage or hopping to the picker clears it.
   //   { kind: "add",    id }
   //   { kind: "edit",   id, prev: {title,url,tags,aliases} }
-  //   { kind: "delete", prev: {title,url,tags,aliases} }
+  //   { kind: "delete", id, prev: {title,url,tags,aliases} }
   undoStack: [],
 };
+const rowQueues = new WeakMap();
+const pendingRowMutations = new Set();
+let manageMutationTail = Promise.resolve();
 
 const $managePage = document.getElementById("manage");
 const $filter = document.getElementById("filter");
@@ -34,10 +39,11 @@ const $addBtn = document.getElementById("add-btn");
 const $hints = document.getElementById("hints");
 const $modalRoot = document.getElementById("modal-root");
 const $tableWrap = document.querySelector(".manage-table-wrap");
+const $status = document.getElementById("status");
 
 const HINTS = {
   insert:
-    "Tab nav · ⎋ revert + normal · ⏎ save+down · ⌘⏎ open in new tab · ? help",
+    "Tab nav · ⎋ revert + normal · ⏎ save+down · ⌘⏎ open in new tab",
   normal:
     "hjkl nav · gg/G top/bottom · i/⏎ edit · a append · o/O new row · dd delete · / filter · ? help",
 };
@@ -56,15 +62,155 @@ function formatList(arr) {
   return (arr || []).join(", ");
 }
 
+function normalizeURL(value) {
+  const trimmed = value.trim();
+  return trimmed && !trimmed.includes("://") ? `https://${trimmed}` : trimmed;
+}
+
+function setStatus(message = "", isError = false) {
+  $status.textContent = message;
+  $status.hidden = message === "";
+  $status.classList.toggle("error", isError);
+}
+
+async function apiFetch(url, options = {}) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (cause) {
+    const method = String(options.method || "GET").toUpperCase();
+    if (["POST", "PUT", "DELETE"].includes(method)) {
+      const error = new Error(
+        "Connection lost while saving. Outcome unknown; reload before retrying.",
+        { cause },
+      );
+      error.unknownOutcome = true;
+      throw error;
+    }
+    throw cause;
+  }
+  const body = response.status === 204
+    ? null
+    : await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  return body;
+}
+
+function requireBookmark(body) {
+  if (
+    !body ||
+    typeof body !== "object" ||
+    typeof body.id !== "string" ||
+    body.id === "" ||
+    typeof body.title !== "string" ||
+    typeof body.url !== "string"
+  ) {
+    const error = new Error(
+      "The server accepted the request but returned an unreadable response. " +
+      "Outcome unknown; reload before retrying.",
+    );
+    error.unknownOutcome = true;
+    throw error;
+  }
+  return body;
+}
+
+function blockRowAfterUnknownOutcome(tr) {
+  tr.dataset.outcomeUnknown = "true";
+  for (const input of tr.querySelectorAll("input")) input.readOnly = true;
+  const deleteButton = tr.querySelector(".del-btn");
+  if (deleteButton) deleteButton.disabled = true;
+}
+
+function setManageMutationControlsLocked(locked) {
+  const globallyLocked = locked || state.mutationBlocked;
+  for (const tr of $rows.querySelectorAll("tr")) {
+    const rowLocked =
+      globallyLocked || tr.dataset.outcomeUnknown === "true";
+    for (const input of tr.querySelectorAll("input")) {
+      input.readOnly = rowLocked;
+    }
+    const deleteButton = tr.querySelector(".del-btn");
+    if (deleteButton) deleteButton.disabled = rowLocked;
+  }
+  $addBtn.disabled = globallyLocked;
+}
+
+function blockManageMutations(message) {
+  state.mutationBlocked = true;
+  setManageMutationControlsLocked(true);
+  setStatus(message, true);
+}
+
+function manageMutationsAllowed() {
+  if (!state.mutationBlocked) return true;
+  setStatus(
+    "A previous mutation has an unknown outcome; reload before making more changes.",
+    true,
+  );
+  return false;
+}
+
+function blockUnknownMutation(tr, message) {
+  blockRowAfterUnknownOutcome(tr);
+  blockManageMutations(message);
+}
+
+async function runManageMutation(task) {
+  if (!manageMutationsAllowed() || state.mutationInFlight) return false;
+  state.mutationInFlight = true;
+  // An undo reload replaces every row node. Lock editing for the whole
+  // explicit action so a blur cannot queue work against a node that the
+  // action is about to disconnect. This also makes the busy state visible.
+  setManageMutationControlsLocked(true);
+  try {
+    // Blur saves are queued too. Let every already-observed edit settle
+    // before an explicit add/delete/undo action enters the same scheduler.
+    await drainRowMutations();
+    if (!manageMutationsAllowed()) return false;
+    await scheduleManageMutation(task);
+    return true;
+  } finally {
+    state.mutationInFlight = false;
+    setManageMutationControlsLocked(false);
+  }
+}
+
+function scheduleManageMutation(task) {
+  const operation = manageMutationTail.then(() => {
+    if (!manageMutationsAllowed()) {
+      const error = new Error(
+        "A previous mutation has an unknown outcome; reload before retrying.",
+      );
+      error.unknownOutcome = true;
+      throw error;
+    }
+    return task();
+  });
+  // Keep the scheduler usable after a known failure while returning the
+  // original rejecting promise to the caller that owns the error UI.
+  manageMutationTail = operation.catch(() => {});
+  return operation;
+}
+
 // ---------------------------------------------------------------------------
 // Initial load + render
 // ---------------------------------------------------------------------------
 
 async function load() {
-  const r = await fetch("/api/bookmarks");
-  const j = await r.json();
-  state.bookmarks = j.bookmarks || [];
-  renderAll();
+  try {
+    const json = await apiFetch("/api/bookmarks");
+    if (!Array.isArray(json?.bookmarks)) {
+      throw new Error("server returned an invalid bookmark list");
+    }
+    state.bookmarks = json.bookmarks;
+    renderAll();
+    setStatus();
+  } catch (error) {
+    setStatus(`Could not load bookmarks: ${error.message}`, true);
+  }
 }
 
 function renderAll() {
@@ -73,7 +219,7 @@ function renderAll() {
     $rows.appendChild(buildRow(b));
   }
   refreshRowIndices();
-  updateCount();
+  applyFilter();
   renderCursor();
 }
 
@@ -90,11 +236,11 @@ function buildRow(b) {
   const tr = document.createElement("tr");
   if (b && b.id) tr.dataset.id = b.id;
   tr.innerHTML = `
-    <td class="cell col-title" data-col-index="0"><input type="text" data-field="title" data-col-index="0" value="${escapeHTML(b?.title ?? "")}"></td>
-    <td class="cell col-url" data-col-index="1"><input type="text" data-field="url" data-col-index="1" value="${escapeHTML(b?.url ?? "")}"></td>
-    <td class="cell col-tags" data-col-index="2"><input type="text" data-field="tags" data-col-index="2" value="${escapeHTML(formatList(b?.tags))}"></td>
-    <td class="cell col-aliases" data-col-index="3"><input type="text" data-field="aliases" data-col-index="3" value="${escapeHTML(formatList(b?.aliases))}"></td>
-    <td class="col-del"><button type="button" class="del-btn" tabindex="-1" aria-label="delete">✕</button></td>
+    <td class="cell col-title" data-col-index="0"><input type="text" aria-label="Title" data-field="title" data-col-index="0" value="${escapeHTML(b?.title ?? "")}"></td>
+    <td class="cell col-url" data-col-index="1"><input type="text" aria-label="URL" data-field="url" data-col-index="1" value="${escapeHTML(b?.url ?? "")}"></td>
+    <td class="cell col-tags" data-col-index="2"><input type="text" aria-label="Tags" data-field="tags" data-col-index="2" value="${escapeHTML(formatList(b?.tags))}"></td>
+    <td class="cell col-aliases" data-col-index="3"><input type="text" aria-label="Aliases" data-field="aliases" data-col-index="3" value="${escapeHTML(formatList(b?.aliases))}"></td>
+    <td class="col-del"><button type="button" class="del-btn" aria-label="Delete ${escapeHTML(b?.title || "draft bookmark")}">✕</button></td>
   `;
   attachRowHandlers(tr);
   return tr;
@@ -123,7 +269,7 @@ function onUrlMouseDown(e) {
   const url = e.currentTarget.value.trim();
   if (!url) return;
   e.preventDefault();   // suppress the focus that would otherwise follow
-  window.open(url, "_blank", "noopener");
+  window.open(normalizeURL(url), "_blank", "noopener");
 }
 
 // Re-index visible rows in the DOM order. Call after add/delete/filter.
@@ -133,7 +279,7 @@ function refreshRowIndices() {
 }
 
 function visibleRows() {
-  return [...$rows.children].filter((tr) => tr.style.display !== "none");
+  return [...$rows.children].filter((tr) => !tr.hidden);
 }
 
 // Return the currently-focused-in-normal-mode row, clamping normalRow to
@@ -242,15 +388,26 @@ function focusCurrentCell(atEnd) {
 function deleteCurrentRow() {
   const tr = currentVisibleRow();
   if (!tr) return;
-  deleteRow(tr);
+  return deleteRow(tr);
 }
 
 async function deleteRow(tr) {
+  if (!manageMutationsAllowed()) return;
   // Clear any in-flight two-tap state — chord IS the confirmation.
   clearPendingDelete();
 
-  // Draft row (no id): just remove from DOM. Nothing was POSTed, so no undo
-  // entry — the server state never changed.
+  // runManageMutation drains row saves before scheduling this delete. A
+  // later blur is placed behind the delete and becomes a no-op once the row
+  // is disconnected.
+  if (tr.dataset.outcomeUnknown === "true") {
+    setStatus(
+      "This row has a save with an unknown outcome; reload before deleting it.",
+      true,
+    );
+    return;
+  }
+
+  // Draft row (no id): just remove from DOM.
   if (!tr.dataset.id) {
     tr.remove();
     refreshRowIndices();
@@ -272,20 +429,20 @@ async function deleteRow(tr) {
     : null;
 
   try {
-    const r = await fetch(
+    await apiFetch(
       "/api/bookmarks/" + encodeURIComponent(id),
       { method: "DELETE" },
     );
-    if (!r.ok && r.status !== 404) return;
-    // Mirror the in-memory bookmarks list too.
     state.bookmarks = state.bookmarks.filter((b) => b.id !== id);
     tr.remove();
     refreshRowIndices();
-    updateCount();
+    applyFilter();
     renderCursor();
-    if (prev) state.undoStack.push({ kind: "delete", prev });
-  } catch {
-    /* leave row alone on network failure */
+    if (prev) state.undoStack.push({ kind: "delete", id, prev });
+    setStatus();
+  } catch (error) {
+    if (error.unknownOutcome) blockUnknownMutation(tr, error.message);
+    setStatus(`Delete failed: ${error.message}`, true);
   }
 }
 
@@ -293,6 +450,7 @@ async function deleteRow(tr) {
 // if there is no current row). Focuses the new row's title cell, which
 // transitions us into insert mode via the focus listener.
 function insertDraftRow(where) {
+  if (!manageMutationsAllowed()) return;
   const draft = buildRow(null);
   const current = currentVisibleRow();
   if (current && where === "above") {
@@ -322,7 +480,7 @@ function openCurrentRowInNewTab() {
   const url = tr.querySelector('input[data-field="url"]')?.value?.trim();
   if (!url) return;
   // No /go/ wrapper here — the manage view is for editing, not visit-tracking.
-  window.open(url, "_blank");
+  window.open(normalizeURL(url), "_blank", "noopener");
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +520,7 @@ function onCellKeydown(e) {
     e.target.blur();
     // Find the next visible sibling row.
     let next = tr.nextElementSibling;
-    while (next && next.style.display === "none") next = next.nextElementSibling;
+    while (next && next.hidden) next = next.nextElementSibling;
     if (next) {
       const sel = `input[data-field="${field}"]`;
       const targetInput = next.querySelector(sel);
@@ -378,7 +536,7 @@ function onCellKeydown(e) {
     e.preventDefault();
     e.target.blur();
     let sib = dir > 0 ? tr.nextElementSibling : tr.previousElementSibling;
-    while (sib && sib.style.display === "none") {
+    while (sib && sib.hidden) {
       sib = dir > 0 ? sib.nextElementSibling : sib.previousElementSibling;
     }
     if (sib) {
@@ -389,168 +547,204 @@ function onCellKeydown(e) {
   }
 }
 
-function revertCell(input) {
+function revertCell(input, markInvalid = false) {
   input.value = input.dataset.original ?? "";
-  input.classList.remove("invalid");
+  input.classList.toggle("invalid", markInvalid);
 }
 
-// On blur: save if dirty + valid. URL field is validated via new URL();
-// title must be non-empty after trim. Tags and aliases are arrays.
-async function onCellBlur(e) {
-  const input = e.target;
-  const tr = input.closest("tr");
-  const field = input.dataset.field;
-  const oldVal = input.dataset.original ?? "";
-  const newVal = input.value;
+function isEditingControl(element) {
+  return (
+    element instanceof Element &&
+    (element === $filter || element.matches("#rows input"))
+  );
+}
 
-  // Always clear stale invalid state when starting a re-validate.
-  input.classList.remove("invalid");
+document.addEventListener("focusin", () => {
+  setMode(isEditingControl(document.activeElement) ? "insert" : "normal");
+});
+document.addEventListener("focusout", (event) => {
+  // relatedTarget is the element receiving focus. Reading it here avoids an
+  // async blur save later overwriting the mode established by a new focus.
+  setMode(isEditingControl(event.relatedTarget) ? "insert" : "normal");
+});
 
-  // After blur logic, decide mode. We do this at the end (after async work)
-  // so a server-validation failure that re-focuses doesn't get clobbered.
-  const maybeEnterNormal = () => {
-    if (
-      !e.relatedTarget ||
-      !(e.relatedTarget instanceof Element) ||
-      !e.relatedTarget.matches(
-        "input, textarea, [contenteditable], button",
-      )
-    ) {
-      setMode("normal");
-    }
+function enqueueRowMutation(tr, work) {
+  const prior = rowQueues.get(tr) || Promise.resolve();
+  const operation = prior.then(() => scheduleManageMutation(work));
+  const settled = operation.catch((error) => {
+    // Block before resolving the queue tail, so already-enqueued operations
+    // observe the unknown state and cannot issue a duplicate POST/PUT.
+    if (error.unknownOutcome) blockUnknownMutation(tr, error.message);
+  });
+  rowQueues.set(tr, settled);
+  pendingRowMutations.add(settled);
+  settled.finally(() => {
+    pendingRowMutations.delete(settled);
+    if (rowQueues.get(tr) === settled) rowQueues.delete(tr);
+  });
+  return operation;
+}
+
+async function drainRowMutations() {
+  while (pendingRowMutations.size > 0) {
+    await Promise.all([...pendingRowMutations]);
+  }
+}
+
+function bookmarkPayload(bookmark) {
+  return {
+    title: bookmark.title,
+    url: bookmark.url,
+    tags: [...(bookmark.tags || [])],
+    aliases: [...(bookmark.aliases || [])],
   };
+}
 
-  // No change → nothing to do, but still flip mode if focus left inputs.
-  if (newVal === oldVal) { maybeEnterNormal(); return; }
+function samePayload(left, right) {
+  return (
+    left.title === right.title &&
+    left.url === right.url &&
+    JSON.stringify(left.tags || []) === JSON.stringify(right.tags || []) &&
+    JSON.stringify(left.aliases || []) === JSON.stringify(right.aliases || [])
+  );
+}
 
-  // Title required (post-trim).
-  if (field === "title" && newVal.trim() === "") {
-    // For an existing row: revert. For a draft row (no id): allow empty —
-    // the draft just stays incomplete.
-    if (tr.dataset.id) {
-      revertCell(input);
-    }
-    maybeEnterNormal();
-    return;
-  }
+function displayValue(field, bookmark) {
+  return field === "tags" || field === "aliases"
+    ? formatList(bookmark[field])
+    : bookmark[field] || "";
+}
 
-  // URL validation only when non-empty. For a real (saved) row, URL is
-  // required; an empty/invalid URL keeps the cell in .invalid and does not
-  // save. Draft rows can have an empty URL (no POST yet).
-  if (field === "url") {
-    if (newVal.trim() === "") {
-      if (tr.dataset.id) {
-        input.classList.add("invalid");
-        maybeEnterNormal();
-        return;
-      }
-      // Draft with empty URL — no POST yet.
-      maybeEnterNormal();
-      return;
-    }
-    if (!isValidURL(newVal.trim())) {
-      input.classList.add("invalid");
-      maybeEnterNormal();
-      return;
+function applyServerBookmark(tr, bookmark, sent) {
+  for (const input of tr.querySelectorAll("input[data-field]")) {
+    const field = input.dataset.field;
+    const sentValue = field === "tags" || field === "aliases"
+      ? formatList(sent[field])
+      : sent[field];
+    // Do not overwrite typing that happened while this request was in flight.
+    if (input.value === sentValue) {
+      const serverValue = displayValue(field, bookmark);
+      input.value = serverValue;
+      input.dataset.original = serverValue;
+      input.classList.remove("invalid");
     }
   }
+  const deleteButton = tr.querySelector(".del-btn");
+  if (deleteButton) deleteButton.setAttribute("aria-label", `Delete ${bookmark.title}`);
+}
 
-  // Tags / aliases — no validation; just parse on send.
-
-  // Build the payload from the row's current input values.
-  const payload = readRowPayload(tr);
-
-  // If draft (no id): POST when both title (post-trim) and url (validated) are present.
-  if (!tr.dataset.id) {
-    if (payload.title.trim() === "" || payload.url.trim() === "") {
-      maybeEnterNormal();
-      return;
-    }
-    if (!isValidURL(payload.url.trim())) {
-      const urlInput = tr.querySelector('input[data-field="url"]');
-      urlInput.classList.add("invalid");
-      maybeEnterNormal();
-      return;
-    }
-    try {
-      const r = await fetch("/api/bookmarks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!r.ok) {
-        input.classList.add("invalid");
-        maybeEnterNormal();
-        return;
-      }
-      const created = await r.json();
-      tr.dataset.id = created.id;
-      // Mirror to in-memory list so subsequent operations are consistent.
-      state.bookmarks.push(created);
-      // Refresh all cached values so future blurs see them as "current."
-      tr.querySelectorAll("input").forEach((i) => {
-        i.dataset.original = i.value;
-      });
-      // Successful POST → undo entry. Drafts that never POST (user added a
-      // row and ✕'d it before any blur) don't reach this branch, so they're
-      // correctly excluded from the stack.
-      state.undoStack.push({ kind: "add", id: created.id });
-    } catch {
-      input.classList.add("invalid");
-    }
-    maybeEnterNormal();
-    return;
+async function persistRow(tr, payload) {
+  if (!tr.isConnected) return;
+  if (state.mutationBlocked || tr.dataset.outcomeUnknown === "true") {
+    const error = new Error(
+      "A previous mutation has an unknown outcome; reload before retrying.",
+    );
+    error.unknownOutcome = true;
+    throw error;
   }
 
-  // Existing row: PUT.
-  // Snapshot the FULL pre-edit bookmark BEFORE sending. Undo just re-PUTs the
-  // whole snapshot — cell-level granularity isn't needed.
-  const id = tr.dataset.id;
-  const beforeBM = state.bookmarks.find((b) => b.id === id);
-  const prev = beforeBM
-    ? {
-        title: beforeBM.title,
-        url: beforeBM.url,
-        tags: [...(beforeBM.tags || [])],
-        aliases: [...(beforeBM.aliases || [])],
-      }
-    : null;
-  try {
-    const r = await fetch(
-      "/api/bookmarks/" + encodeURIComponent(id),
+  const existingId = tr.dataset.id;
+  if (!existingId) {
+    const created = requireBookmark(await apiFetch("/api/bookmarks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }));
+    tr.dataset.id = created.id;
+    state.bookmarks.push(created);
+    applyServerBookmark(tr, created, payload);
+    state.undoStack.push({ kind: "add", id: created.id });
+  } else {
+    const before = state.bookmarks.find((bookmark) => bookmark.id === existingId);
+    if (before && samePayload(bookmarkPayload(before), payload)) {
+      applyServerBookmark(tr, before, payload);
+      return;
+    }
+    const prev = before ? bookmarkPayload(before) : null;
+    const updated = requireBookmark(await apiFetch(
+      "/api/bookmarks/" + encodeURIComponent(existingId),
       {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       },
-    );
-    if (!r.ok) {
-      // Server rejected — restore the cell to its pre-edit value and mark
-      // .invalid so the user sees the failure. No undo entry pushed.
+    ));
+    const index = state.bookmarks.findIndex((bookmark) => bookmark.id === existingId);
+    if (index >= 0) state.bookmarks[index] = updated;
+    applyServerBookmark(tr, updated, payload);
+    if (prev) state.undoStack.push({ kind: "edit", id: existingId, prev });
+  }
+
+  applyFilter();
+  setStatus();
+}
+
+// Validate synchronously on blur, then enqueue the row mutation. A row has a
+// single promise chain, so rapid Tab/Enter navigation cannot reorder PUTs or
+// issue duplicate POSTs for a draft.
+function onCellBlur(e) {
+  const input = e.target;
+  const tr = input.closest("tr");
+  const field = input.dataset.field;
+  const oldVal = input.dataset.original ?? "";
+  if (!manageMutationsAllowed()) return;
+  if (field === "url") input.value = normalizeURL(input.value);
+  const newVal = input.value;
+
+  input.classList.remove("invalid");
+  if (newVal === oldVal) return;
+
+  if (field === "title" && newVal.trim() === "") {
+    if (tr.dataset.id) {
       input.classList.add("invalid");
-      revertCell(input);
-      maybeEnterNormal();
+      setStatus("Title is required; the row was not saved.", true);
+    }
+    return;
+  }
+
+  if (field === "url") {
+    if (newVal.trim() === "") {
+      if (tr.dataset.id) {
+        input.classList.add("invalid");
+        setStatus("URL is required; the row was not saved.", true);
+      }
       return;
     }
-    // Success — make this the new "original" for future revert behavior.
-    input.dataset.original = newVal;
-    // Mirror to in-memory list.
-    const idx = state.bookmarks.findIndex((b) => b.id === id);
-    if (idx >= 0) {
-      state.bookmarks[idx] = { ...state.bookmarks[idx], ...payload };
+    if (!isValidURL(newVal.trim())) {
+      input.classList.add("invalid");
+      setStatus("Enter a URL with a scheme and host.", true);
+      return;
     }
-    if (prev) state.undoStack.push({ kind: "edit", id, prev });
-  } catch {
-    input.classList.add("invalid");
   }
-  maybeEnterNormal();
+
+  const payload = readRowPayload(tr);
+  payload.url = normalizeURL(payload.url);
+
+  if (!tr.dataset.id) {
+    if (payload.title.trim() === "" || payload.url.trim() === "") return;
+    if (!isValidURL(payload.url.trim())) {
+      const urlInput = tr.querySelector('input[data-field="url"]');
+      urlInput.classList.add("invalid");
+      setStatus("Enter a URL with a scheme and host.", true);
+      return;
+    }
+  }
+
+  void enqueueRowMutation(tr, () => persistRow(tr, payload)).catch((error) => {
+    if (!input.isConnected) return;
+    input.classList.add("invalid");
+    if (error.unknownOutcome) {
+      blockUnknownMutation(tr, error.message);
+    }
+    setStatus(`Save failed: ${error.message}`, true);
+  });
 }
 
 function readRowPayload(tr) {
   const get = (f) => tr.querySelector(`input[data-field="${f}"]`).value;
   return {
     title: get("title").trim(),
-    url: get("url").trim(),
+    url: normalizeURL(get("url")),
     tags: parseList(get("tags")),
     aliases: parseList(get("aliases")),
   };
@@ -591,7 +785,13 @@ async function onDeleteClick(e) {
   // Second click within 2s: actually delete.
   clearTimeout(state.pendingDelete?.timer);
   state.pendingDelete = null;
-  await deleteRow(tr);
+  try {
+    await runManageMutation(() => deleteRow(tr));
+  } finally {
+    // A known failure or a scheduler rejection must require a fresh
+    // confirmation. Never leave the row visually/behaviorally armed.
+    tr.classList.remove("deleting");
+  }
 }
 
 function clearPendingDelete(exceptRow) {
@@ -614,15 +814,17 @@ document.addEventListener("click", (e) => {
 // ---------------------------------------------------------------------------
 
 $addBtn.addEventListener("click", () => {
-  const tr = buildRow(null);
-  $rows.insertBefore(tr, $rows.firstChild);
-  refreshRowIndices();
-  updateCount();
-  state.normalRow = 0;
-  state.normalCol = 0;
-  renderCursor();
-  const titleInput = tr.querySelector('input[data-field="title"]');
-  titleInput.focus();
+  void runManageMutation(() => {
+    const tr = buildRow(null);
+    $rows.insertBefore(tr, $rows.firstChild);
+    refreshRowIndices();
+    updateCount();
+    state.normalRow = 0;
+    state.normalCol = 0;
+    renderCursor();
+    const titleInput = tr.querySelector('input[data-field="title"]');
+    titleInput.focus();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -630,18 +832,8 @@ $addBtn.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 
 $filter.addEventListener("input", applyFilter);
-$filter.addEventListener("focus", () => setMode("insert"));
-$filter.addEventListener("blur", (e) => {
-  if (
-    !e.relatedTarget ||
-    !(e.relatedTarget instanceof Element) ||
-    !e.relatedTarget.matches("input, textarea, [contenteditable], button")
-  ) {
-    setMode("normal");
-  }
-});
 $filter.addEventListener("keydown", (e) => {
-  // Esc in filter: blur (preserving value) → enter normal mode via blur listener.
+  // Esc in filter: blur (preserving value) and enter normal mode.
   if (e.key === "Escape") {
     e.preventDefault();
     $filter.blur();
@@ -652,7 +844,7 @@ function applyFilter() {
   const q = $filter.value.trim();
   // Empty filter: show all rows.
   if (q === "") {
-    [...$rows.children].forEach((tr) => (tr.style.display = ""));
+    [...$rows.children].forEach((tr) => { tr.hidden = false; });
     updateCount();
     clampCursorToVisible();
     renderCursor();
@@ -700,7 +892,7 @@ function applyFilter() {
 
   for (const tr of rows) {
     const v = viewByRow.get(tr);
-    tr.style.display = matchedSet.has(v) ? "" : "none";
+    tr.hidden = !matchedSet.has(v);
   }
   updateCount();
   clampCursorToVisible();
@@ -740,11 +932,11 @@ const ACTIONS = {
   "page-up":       () => pageScrollRows(-1),
   "edit-cell":     () => focusCurrentCell(false),
   "append-cell":   () => focusCurrentCell(true),
-  "delete-row":    () => deleteCurrentRow(),
-  "insert-below":  () => insertDraftRow("below"),
-  "insert-above":  () => insertDraftRow("above"),
+  "delete-row":    () => runManageMutation(deleteCurrentRow),
+  "insert-below":  () => runManageMutation(() => insertDraftRow("below")),
+  "insert-above":  () => runManageMutation(() => insertDraftRow("above")),
   "focus-filter":  () => $filter.focus(),
-  "undo":          () => undo(),
+  "undo":          () => runManageMutation(undo),
   "show-help":     () => showHelpOverlay(),
   "goto-picker":   () => { if (window.location.pathname !== "/") window.location.href = "/"; },
   "open-theme-picker": () => openThemePicker(),
@@ -813,6 +1005,12 @@ function dispatchNormalKey(key, event) {
 document.addEventListener("keydown", (e) => {
   // Modal overlay (help, etc.) handles its own keys.
   if (document.querySelector(".modal-overlay")) return;
+  if (
+    e.target instanceof Element &&
+    e.target.closest("a, button, select, textarea, [contenteditable='true']")
+  ) {
+    return;
+  }
 
   // ⌘⏎ / Ctrl+⏎ — open current row's URL in new tab (both modes).
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -862,12 +1060,14 @@ document.addEventListener("keydown", (e) => {
 // Help overlay
 // ---------------------------------------------------------------------------
 
+let modalReturnFocus = null;
+
 function showHelpOverlay() {
-  closeModal();
+  modalReturnFocus = document.activeElement;
   $modalRoot.innerHTML = `
-    <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-      <div class="modal">
-        <h2><span>Keyboard shortcuts</span><span class="esc">⎋ to close</span></h2>
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="manage-help-title">
+      <div class="modal" tabindex="-1">
+        <h2 id="manage-help-title"><span>Keyboard shortcuts</span><span class="esc">⎋ to close</span></h2>
         <div class="help-section">
           <div class="help-section-title">Insert mode (any cell or filter focused)</div>
           <dl class="help-list">
@@ -908,51 +1108,64 @@ function showHelpOverlay() {
   document.getElementById("m-close").addEventListener("click", closeModal);
   $modalRoot.querySelector(".modal").addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeModal(); return; }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      document.getElementById("m-close").focus();
+    }
   });
   document.getElementById("m-close").focus();
 }
 
 function closeModal() {
   $modalRoot.innerHTML = "";
-  // After closing, leave focus on the page body so we stay in normal mode.
-  // (Don't auto-focus the filter — picker's flow is different.)
+  const returnFocus = modalReturnFocus;
+  modalReturnFocus = null;
+  if (returnFocus instanceof HTMLElement && returnFocus.isConnected) {
+    returnFocus.focus();
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Undo (vim `u` in normal mode)
 //
-// One entry per `u` press. Silent — the reappearing / disappearing /
-// reverting row IS the feedback. On failure (e.g. user over-undid into a
-// deleted-then-restored bookmark whose id is stale), surface and stop;
-// don't auto-recover.
 // ---------------------------------------------------------------------------
+function rekeyUndoReferences(oldId, newId) {
+  for (const item of state.undoStack) {
+    if (item.id === oldId) item.id = newId;
+  }
+}
+
 async function undo() {
-  if (state.undoStack.length === 0) return; // silent no-op
+  if (!manageMutationsAllowed()) return;
+  if (state.undoStack.length === 0) return;
   const entry = state.undoStack.pop();
   try {
     if (entry.kind === "delete") {
-      const r = await fetch("/api/bookmarks", {
+      const restored = requireBookmark(await apiFetch("/api/bookmarks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry.prev),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      }));
+      rekeyUndoReferences(entry.id, restored.id);
     } else if (entry.kind === "edit") {
-      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+      requireBookmark(await apiFetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry.prev),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      }));
     } else if (entry.kind === "add") {
-      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+      await apiFetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
         method: "DELETE",
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
     }
     await load();
   } catch (err) {
-    alert("undo failed: " + err.message);
+    if (err.unknownOutcome) {
+      blockManageMutations(`Undo failed: ${err.message}`);
+    } else {
+      state.undoStack.push(entry);
+      setStatus(`Undo failed: ${err.message}`, true);
+    }
   }
 }
 
@@ -960,4 +1173,20 @@ async function undo() {
 // Boot
 // ---------------------------------------------------------------------------
 
+function reconcileManageMode({ requestDefaultFocus = false } = {}) {
+  const active = document.activeElement;
+  if (
+    requestDefaultFocus &&
+    (active === document.body || active === document.documentElement)
+  ) {
+    // Autofocus is only a hint. Attempt it once, then reflect the focus the
+    // browser actually granted so keyboard input never lands in a phantom
+    // insert mode.
+    $filter.focus({ preventScroll: true });
+  }
+  setMode(isEditingControl(document.activeElement) ? "insert" : "normal");
+}
+
 load();
+reconcileManageMode({ requestDefaultFocus: true });
+window.addEventListener("pageshow", () => reconcileManageMode());

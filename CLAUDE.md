@@ -1,90 +1,168 @@
-# Claude instructions for the snackpage repo
+# Repository instructions for AI assistants
 
-This file is for AI assistants working in this repo. For *what* the project is, see [`ARCHITECTURE.md`](ARCHITECTURE.md). For the design spec and feature roadmap, see [`docs/superpowers/specs/2026-05-23-snackpage-design.md`](docs/superpowers/specs/2026-05-23-snackpage-design.md).
+Read `ARCHITECTURE.md` before changing behavior. `README.md` is the
+user-facing contract. Files under `docs/superpowers/` are historical records,
+not executable plans.
 
-## Identity (read this first)
+## Product identity
 
-**snackpage is a personal bookmark datastore that ships with a fuzzy-finder frontend.**
+snackpage is a personal bookmark datastore with a fuzzy picker and manage
+view. The bookmark library is canonical; a UI is a client of that library.
+Domain changes therefore need coordinated store, HTTP, CLI, frontend, test, and
+documentation updates.
 
-Not "a picker that happens to store bookmarks." The bookmark library is the product; the picker is one frontend. Future frontends (Bubbletea TUI, Chromium companion extension, alternative web layouts) will plug into the same store. This framing matters because it tells you which changes are local (frontend) and which ripple everywhere (domain).
+The intended product remains small:
 
-## Stack and discipline
+- Go stdlib first;
+- vanilla JavaScript with no runtime build step;
+- a single embedded runtime dependency, vendored `fzf-for-js`;
+- XDG JSON storage;
+- one writer per data directory;
+- loopback HTTP only;
+- macOS and Linux; no Windows support.
 
-- **Go stdlib first.** `net/http` 1.22 mux patterns, `log/slog`, `embed`, `flag`. No cobra, no chi, no viper.
-- **Frontend is vanilla JS** plus one vendored library (`fzf-for-js`). No npm, no build step.
-- **Domain-driven layering.** Domain (pure) → Application (`store.Store`) → Infrastructure (file I/O) → Interfaces (HTTP, CLI, web frontend). See `ARCHITECTURE.md` §4 for the dependency rules.
-- **YAGNI on interfaces.** A `Repository` interface only earns its keep when a second adapter exists. Today we have one (file-backed JSON); don't introduce indirection.
-- **Stdlib paths via XDG.** Data goes to `$XDG_DATA_HOME/snackpage/`, config (if/when added) to `$XDG_CONFIG_HOME/snackpage/`. Use `internal/xdg` for resolution.
-- **Atomic writes everywhere on disk.** Anything that touches a JSON file goes through `internal/store/atomic.go`.
-- **Loopback only.** `127.0.0.1`, no CORS, no auth. Never bind to `0.0.0.0` without an explicit user request.
+Do not introduce a framework, database, cloud service, authentication layer,
+or repository abstraction unless a concrete requirement earns that cost.
 
-## Maintenance rules
+## Non-negotiable invariants
 
-Before committing a change, check whether these files need updating:
+### Storage
 
-| Change | Update |
+- `bookmarks.json` is canonical; `state.json` is volatile.
+- Every writable store owns `.snackpage.lock` for its entire lifetime and must
+  be closed.
+- Dry-run/read-only paths use `store.LoadSnapshot` and must not create files.
+- Mutations are copy-on-write. Never modify the live snapshot before canonical
+  persistence succeeds.
+- Check the bookmark fingerprint before every canonical write; surface an
+  external-change conflict rather than overwriting it.
+- Every JSON replacement goes through `internal/store/atomic.go`.
+- Rename is the logical commit point. Report post-commit durability warnings,
+  but never expose them as replayable mutation failures.
+- Preserve strict schema validation and reject unsupported versions untouched.
+  Invalid current-version bookmarks fail; invalid current-version state uses
+  the documented recovery-copy/reset path only for writable `Store.New`.
+- Return and wrap typed errors. Never branch on error strings.
+- `List` returns deep copies, including nested tags and aliases.
+- State persistence is best-effort where loss affects only visit statistics;
+  canonical bookmark persistence is not.
+- Manual edits, restores, `git pull`, and sync-tool replacements happen only
+  while the daemon is stopped.
+
+### Server and CLI
+
+- Never listen on a non-loopback address.
+- Keep Host and same-origin mutation checks plus the security headers.
+- Mutation JSON stays content-type checked, bounded, unknown-field rejecting,
+  and single-value only.
+- HTTP wire types stay separate from on-disk domain types.
+- Only a real GET redirect records a visit; HEAD does not.
+- `add` and `import chrome` are API-first. Automatic disk fallback is allowed
+  only for a definitive connection refusal.
+- Timeouts, resets, response read/decode failures, and HTTP responses never
+  trigger a direct retry because the mutation outcome may be unknown.
+- `--offline` still acquires the same lifetime store lock.
+- Keep user-facing errors prefixed with the subcommand name.
+
+### Frontend
+
+- Runtime code is plain JavaScript, HTML, and CSS. npm is test tooling only.
+- Frecency is computed by Go and sent as `frecency_score`; do not copy the
+  formula into JavaScript.
+- Track selected bookmarks by ID, not array position.
+- Serialize all manage writes through the global scheduler and preserve the
+  additional per-row queues for ordered blur saves.
+- Keep picker mutations single-flight. An unknown mutation outcome blocks
+  further writes until a full reload; never retry it from the page.
+- Apply normalized server responses instead of assuming the request payload is
+  canonical.
+- Derive mode from actual focus and keep focus restoration/focus traps intact.
+- Failed undo operations remain retryable; restored IDs must rekey dependent
+  undo entries.
+- Theme IDs come from the shared validated registry. Runtime assets must remain
+  local and compatible with the CSP.
+- Keyboard behavior must have a discoverable visible or help-overlay path.
+
+## Change map
+
+| Change | Required review surface |
 |---|---|
-| New CLI subcommand or flag | `cmd/snackpage/main.go` (switch + `printUsage`), `README.md` (Usage section), `ARCHITECTURE.md` §3 file table |
-| New HTTP route | `internal/server/server.go` route registration, `ARCHITECTURE.md` §5 data flow if it's a new path |
-| New bookmark field | `internal/store/types.go`, `validateBookmark`, `internal/server/bookmarks.go` wire shape, `internal/web/assets/app.js` render + modal, `ARCHITECTURE.md` §7 (the "new bookmark field" row), spec §4 data model |
-| Architecture shift (new package, layer reorg, new frontend) | `ARCHITECTURE.md` (file table, layers, data flow), `CLAUDE.md` (identity if framing changes) |
-| New feature with user-facing surface | `README.md` (Usage), spec §10 if it changes the roadmap shape |
-| New dependency (Go or JS) | `go.mod` + `go.sum` for Go; `NOTICE` + sha256 in NOTICE for JS. Justify in the commit message: what does this earn that stdlib doesn't? |
-| Spec carryover item resolved | Mention in the commit, remove from project memory's "carryover" list |
+| CLI subcommand or flag | `cmd/snackpage`, usage output, README, CLI tests |
+| HTTP route or wire field | route registration, handler tests, ARCHITECTURE |
+| Bookmark field | store schema/validation, HTTP mapping, both views, import behavior, docs |
+| Storage invariant | store tests including failure paths, CLI lifecycle, server lifecycle, docs |
+| Theme | CSS file, shared registry, theme tests, README theme count |
+| Runtime JS dependency | vendored file, fixed version/hash, complete license in NOTICE |
+| Architecture shift | ARCHITECTURE, README, this file |
 
-If you skipped one of these, ask yourself why before committing.
+## Testing
 
-## Commit conventions
+Run the narrowest relevant test while iterating, then finish with the
+proportional project gates:
 
-- **Conventional Commits.** `feat(scope):`, `fix(scope):`, `docs:`, `test:`, `chore:`, `vendor:`. Scope follows the directory (`cmd`, `server`, `store`, `web`, `frecency`, etc.).
-- **One concern per commit.** A bug fix and a refactor are two commits.
-- **Commit the test, then the implementation** when doing TDD — the failing test goes first so `git log -p` reads like the development story.
-- **Co-authored-by Claude** when Claude wrote substantive code: `Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>`. Not for trivial edits.
+```bash
+make format-check
+make lint
+make test
+make e2e
+make test-frontend
+make test-frontend-smoke
+```
 
-## Testing discipline
+`make check` runs all of them. `golangci-lint` is required and absence is a
+failure.
 
-- Per-package tests live next to the code (`foo_test.go` next to `foo.go`).
-- **External `package x_test`** for the public API, **internal `package x`** for unexported helpers. Both can coexist in the same directory.
-- `t.TempDir()` for any test that touches the filesystem. Never write to `$XDG_DATA_HOME`.
-- `httptest.NewServer` for HTTP integration tests; never start a real listener on a fixed port from a test.
-- `make test` is `go test ./... -race -cover`. Coverage targets per package:
-  - `internal/frecency`, `internal/xdg`: 100% (pure stdlib, no excuses)
-  - `internal/store`: ≥75% (atomic writes + concurrency)
-  - `internal/server`: ≥80% (integration paths)
-  - `cmd/snackpage`: not required (it's the entry point; covered by `make e2e`)
-- `make e2e` runs `scripts/e2e.sh` — a curl-based end-to-end smoke test against a fresh binary. **Known flake:** uses `sleep 0.3` after starting the server; on cold-binary first launch it can race. Re-run usually succeeds. Replace with poll-until-healthz when annoyed enough.
-- `make test-frontend` runs Playwright smoke tests in `tests/frontend/` against a freshly-built binary. Playwright's `webServer` config polls `/healthz` so there's no sleep race. Tests cover: list load, fuzzy filter, mode toggle (Esc → normal, `i` → insert), j/k navigation in normal mode, Enter → `/go/:id` redirect.
-- First-time setup: `make setup-frontend` (downloads Playwright's bundled Chromium, ~150MB to `~/Library/Caches/ms-playwright/`).
-- **Test artifacts** (`tests/frontend/node_modules/`, `test-results/`, `playwright-report/`) are gitignored. The config + specs are committed.
-- **Playwright artifact:** headless Chromium doesn't always honor `autofocus` like a real browser. Tests explicitly `await page.locator("#q").focus()` in `beforeEach` to mirror real-user landing state. This is a test-side workaround, not a snackpage bug.
+Testing conventions:
 
-## Dev workflow
+- public Go APIs use external `package x_test` where practical;
+- unexported helpers may use internal tests;
+- filesystem tests use `t.TempDir()`;
+- HTTP unit/integration tests use `httptest`, not a fixed real port;
+- assert typed error identity with `errors.Is`/`errors.As`;
+- storage failure tests assert both returned error and unchanged live/disk
+  state;
+- full mutating browser coverage is Chromium-only and serial;
+- Firefox/WebKit coverage is read-only smoke;
+- browser fixtures must clean up anything they create.
 
-- Make targets never bind `127.0.0.1:8765` or touch `$XDG_DATA_HOME/snackpage/`. That port + data dir belong exclusively to the installed daemon (brew). Two processes against the same `bookmarks.json` is a lost-update hazard, so we don't let make make that easy.
-- `make dev` builds and runs against `.dev/` (isolated XDG dirs, port 8766) with `--dev` set so HTTP caching is disabled. Daily-driver dev command. Same goes for `make dev-demo` (seeded with demo data).
-- A dev instance and the installed instance can run simultaneously — different ports, different data dirs — so you can keep your real picker open while iterating. `DEV_PORT` is overridable on the command line (`make DEV_PORT=9999 dev`) if you want a second dev instance alongside the first.
-- `make dev-stop` SIGTERMs whatever is bound to `:8766` (with a SIGKILL fallback after ~2s). Useful when a dev daemon was launched headlessly — e.g. from an agent shell — and there's no TTY to Ctrl-C. `make dev-restart` chains stop + start.
-- `make help` lists every target with its one-line description.
-- To test a freshly-built binary against real data, run `./snackpage serve` by hand after stopping the installed service. There's no make target for it on purpose.
-- After dev work, `make clean` removes `.dev/` and the binary.
+Node 24 LTS and Playwright 1.61 are pinned. Use `npm ci` and
+`npx --no-install`; do not let npx download an unpinned package.
 
-## Things to never do
+## Development workflow
 
-- **Never commit `.dev/` or anything inside it.** It's in `.gitignore` for a reason.
-- **Never bypass `internal/store/atomic.go` for a file write.** Raw `os.WriteFile` on `bookmarks.json` will eventually eat your data.
-- **Never call `time.Now()` inside pure domain code.** Pass `now time.Time` as a parameter. (Frecency is the canonical example.)
-- **Never introduce a third-party Go library** without justifying it in the commit message. The stdlib bar is high here.
-- **Never modify a tagged commit** (`v1.0.0` through current). Tags are immutable history.
-- **Never trust an HTTP error string for control flow.** The `bookmark not found` literal match in `handleUpdateBookmark` is a known fragility flagged in spec carryovers — replace with `errors.Is(err, store.ErrBookmarkNotFound)` when you have an excuse to touch it.
+Make targets isolate work from the installed daemon:
 
-## Style nudges (Drew's preferences)
+- `make dev` and `make dev-demo` use `.dev/` and port 8766;
+- `DEV_PORT` selects another development port;
+- `make dev-stop` stops only the validated PID recorded by the dev target;
+- `make dev-add` sends to the isolated daemon;
+- `make clean` removes only known build/test/dev artifacts.
 
-- **Names match what things do, not how they work.** `Store.Visit()` not `Store.IncrementCounterAndPersist()`.
-- **Comments explain *why*, not *what*.** The code says what; the comment says the constraint or the surprise.
-- **Errors are values, not exceptions.** Return them, wrap them with `%w`, let callers `errors.As` if they need to discriminate.
-- **Prefer composition over inheritance.** snackpage has no inheritance because Go has no inheritance — but it also has minimal embedding, by design.
-- **Vim/keyboard culture.** When designing UI affordances, ask "what's the keyboard path?" first. Mouse paths come second.
+Never point development automation at the user's default data directory.
+Testing a fresh binary with real data is a deliberate manual operation after
+the installed daemon is stopped.
 
-## When in doubt
+`make release` is the only automated release path. With no `VERSION`, it bumps
+the latest stable tag published on `origin` to the next minor version and
+resets patch to zero; `VERSION=X.Y.Z` is the explicit override. It must keep
+the source tree clean, run `make check` before publishing, use an annotated
+stable-semver tag, checksum the GitHub-hosted tag archive, and update the
+Homebrew tap before upgrading and restarting the installed service. It must
+never stage or commit source changes. Only untracked `.claude/` files may be
+ignored by its source-cleanliness check. Keep its atomic source/tap release
+locks, in-progress release marker, monotonic-version and new-commit checks,
+exact formula-content validation, and restartable remote-stage verification
+intact.
 
-Open `ARCHITECTURE.md` and check §7 (extension points) — it has a row for most kinds of change. If your change doesn't fit a row, the architecture probably needs a small update, not your code.
+## Style
+
+- Names describe domain intent (`Visit`, `AddBatch`), not implementation.
+- Comments explain constraints and surprises rather than restating code.
+- Pass clocks or timestamps into pure logic; do not hide `time.Now()` there.
+- Prefer small concrete types until a second implementation proves an
+  interface is useful.
+- Preserve browser shortcuts except for the documented Enter modifiers.
+- Keep the normal-mode command vocabulary vim-like and consistent between
+  picker and manage views.
+- Use Conventional Commit prefixes when committing: `feat(scope):`,
+  `fix(scope):`, `test:`, `docs:`, `chore:`, `vendor:`.

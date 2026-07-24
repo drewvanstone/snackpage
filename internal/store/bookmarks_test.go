@@ -1,6 +1,7 @@
 package store
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -60,6 +61,29 @@ func TestLoadBookmarks_BadJSON(t *testing.T) {
 	}
 	if _, err := loadBookmarks(path); err == nil {
 		t.Error("expected error on malformed JSON")
+	}
+}
+
+func TestLoadBookmarksSnapshotFingerprintsParsedBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bookmarks.json")
+	raw := []byte("{\n  \"version\": 1,\n  \"bookmarks\": []\n}\n")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, fingerprint, exists, err := loadBookmarksSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("existing snapshot reported as missing")
+	}
+	if loaded.Version != bookmarksSchemaVersion || len(loaded.Bookmarks) != 0 {
+		t.Fatalf("loaded snapshot = %+v", loaded)
+	}
+	if want := sha256.Sum256(raw); fingerprint != want {
+		t.Fatalf("fingerprint = %x; want %x", fingerprint, want)
 	}
 }
 

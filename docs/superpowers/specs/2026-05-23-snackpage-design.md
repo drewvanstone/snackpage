@@ -1,6 +1,12 @@
 # snackpage — design
 
-**Status:** draft, brainstormed 2026-05-23
+> **Historical design record:** This document captures the May 2026 v1
+> brainstorm and later roadmap notes. Shipped behavior has evolved; use
+> `README.md` for user-facing behavior and `ARCHITECTURE.md` for current
+> invariants. In particular, continuous synchronization or manual replacement
+> of the JSON files is safe only while the daemon is stopped.
+
+**Status:** historical, originally brainstormed 2026-05-23
 **Owner:** Drew Flower (`dflower@nvidia.com`)
 **Tagline:** A keyboard-driven, snacks.nvim-inspired bookmark picker that lives at your browser's new-tab page.
 

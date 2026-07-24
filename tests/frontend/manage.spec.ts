@@ -48,10 +48,10 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
 
   test("/manage renders all bookmarks as rows", async ({ page }) => {
     const rows = await page.locator("#rows tr").count();
-    expect(rows).toBe(100);
+    expect(rows).toBe(await fetchBookmarkCount(page));
   });
 
-  test("filter input is the first tab-stop", async ({ page }) => {
+  test("native navigation link and filter are keyboard reachable", async ({ page }) => {
     // Reset focus to the document root, then Tab and observe where focus lands.
     // Setting tabIndex=-1 on documentElement makes it focusable so we can blur
     // off whatever was focused by beforeEach. (body.focus() doesn't reliably
@@ -61,6 +61,8 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
       document.documentElement.tabIndex = -1;
       document.documentElement.focus();
     });
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".back-link")).toBeFocused();
     await page.keyboard.press("Tab");
     const focusedId = await page.evaluate(
       () => document.activeElement?.id ?? "",
@@ -73,13 +75,13 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     // Filter is synchronous on input — but allow one tick for fzf.
     await page.waitForFunction(() => {
       const all = [...document.querySelectorAll("#rows tr")];
-      const visible = all.filter((tr) => (tr as HTMLElement).style.display !== "none");
+      const visible = all.filter((tr) => !(tr as HTMLTableRowElement).hidden);
       return visible.length > 0 && visible.length < all.length;
     });
     const visibleTitles = await page.evaluate(() => {
       const trs = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
       return trs
-        .filter((tr) => tr.style.display !== "none")
+        .filter((tr) => !tr.hidden)
         .map(
           (tr) =>
             (tr.querySelector('input[data-field="title"]') as HTMLInputElement)
@@ -97,13 +99,13 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     await page.locator("#filter").fill("shopping");
     await page.waitForFunction(() => {
       const all = [...document.querySelectorAll("#rows tr")];
-      const visible = all.filter((tr) => (tr as HTMLElement).style.display !== "none");
+      const visible = all.filter((tr) => !(tr as HTMLTableRowElement).hidden);
       return visible.length > 0 && visible.length < all.length;
     });
     const visibleTitles = await page.evaluate(() => {
       const trs = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
       return trs
-        .filter((tr) => tr.style.display !== "none")
+        .filter((tr) => !tr.hidden)
         .map(
           (tr) =>
             (
@@ -132,7 +134,7 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     await page.waitForFunction(() => {
       const all = [...document.querySelectorAll("#rows tr")];
       const visible = all.filter(
-        (tr) => (tr as HTMLElement).style.display !== "none",
+        (tr) => !(tr as HTMLTableRowElement).hidden,
       );
       return visible.length > 0 && visible.length < all.length;
     });
@@ -140,39 +142,53 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     await page.waitForFunction((expected: number) => {
       const all = [...document.querySelectorAll("#rows tr")];
       const visible = all.filter(
-        (tr) => (tr as HTMLElement).style.display !== "none",
+        (tr) => !(tr as HTMLTableRowElement).hidden,
       );
       return visible.length === expected;
     }, totalBefore);
     const visible = await page.evaluate(() => {
       const trs = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
-      return trs.filter((tr) => tr.style.display !== "none").length;
+      return trs.filter((tr) => !tr.hidden).length;
     });
     expect(visible).toBe(totalBefore);
   });
 
-  test("editing a title cell + blur saves via PUT", async ({ page }) => {
-    const id = await pickFirstRowId(page);
-    const newTitle = `pw-edited-${Date.now()}`;
+  test("editing a title cell + blur saves via PUT", async ({ page, request }) => {
+    const stamp = Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: `Edit Fixture ${stamp}`,
+        url: `https://edit-fixture-${stamp}.example`,
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const owned = await create.json();
 
-    const cell = page.locator(
-      `#rows tr[data-id="${id}"] input[data-field="title"]`,
-    );
-    await cell.focus();
-    await cell.fill(newTitle);
+    try {
+      await page.goto("/manage");
+      const cell = page.locator(
+        `#rows tr[data-id="${owned.id}"] input[data-field="title"]`,
+      );
+      await expect(cell).toBeVisible();
+      const newTitle = `pw-edited-${stamp}`;
+      await cell.focus();
+      await cell.fill(newTitle);
 
-    // Wait for the PUT round-trip triggered by blur.
-    const putPromise = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/bookmarks/${id}`) &&
-        r.request().method() === "PUT",
-    );
-    await page.keyboard.press("Tab");
-    const putResp = await putPromise;
-    expect(putResp.ok()).toBeTruthy();
+      // Wait for the PUT round-trip triggered by blur.
+      const putPromise = page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/bookmarks/${owned.id}`) &&
+          r.request().method() === "PUT",
+      );
+      await page.keyboard.press("Tab");
+      const putResp = await putPromise;
+      expect(putResp.ok()).toBeTruthy();
 
-    const stored = await fetchBookmark(page, id);
-    expect(stored?.title).toBe(newTitle);
+      const stored = await fetchBookmark(page, owned.id);
+      expect(stored?.title).toBe(newTitle);
+    } finally {
+      await request.delete(`/api/bookmarks/${owned.id}`);
+    }
   });
 
   test("Esc reverts a cell without saving", async ({ page }) => {
@@ -234,58 +250,88 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     expect(focusedField).toBe("title");
   });
 
-  test("completing the draft row triggers POST", async ({ page }) => {
+  test("completing the draft row triggers POST", async ({ page, request }) => {
     const before = await fetchBookmarkCount(page);
+    let createdId = "";
 
-    await page.locator("#add-btn").click();
-    const draft = page.locator("#rows tr").first();
-    const title = draft.locator('input[data-field="title"]');
-    const url = draft.locator('input[data-field="url"]');
+    try {
+      await page.locator("#add-btn").click();
+      const draft = page.locator("#rows tr").first();
+      const title = draft.locator('input[data-field="title"]');
+      const url = draft.locator('input[data-field="url"]');
 
-    const stamp = Date.now();
-    await title.fill(`Playwright Draft ${stamp}`);
-    await url.fill(`https://pw-draft-${stamp}.example`);
+      const stamp = Date.now();
+      await title.fill(`Playwright Draft ${stamp}`);
+      await url.fill(`https://pw-draft-${stamp}.example`);
 
-    const postPromise = page.waitForResponse(
-      (r) =>
-        r.url().endsWith("/api/bookmarks") && r.request().method() === "POST",
-    );
-    // Blur the url input to trigger the POST.
-    await url.blur();
-    const postResp = await postPromise;
-    expect(postResp.ok()).toBeTruthy();
+      const postPromise = page.waitForResponse(
+        (r) =>
+          r.url().endsWith("/api/bookmarks") && r.request().method() === "POST",
+      );
+      // Blur the url input to trigger the POST.
+      await url.blur();
+      const postResp = await postPromise;
+      expect(postResp.ok()).toBeTruthy();
+      const created = await postResp.json();
+      createdId = created.id;
 
-    const after = await fetchBookmarkCount(page);
-    expect(after).toBe(before + 1);
-    // The draft row now has a server-issued id.
-    await expect(draft).toHaveAttribute("data-id", /.+/);
+      const after = await fetchBookmarkCount(page);
+      expect(after).toBe(before + 1);
+      // The draft row now has the server-issued id.
+      await expect(draft).toHaveAttribute("data-id", createdId);
+    } finally {
+      if (createdId) await request.delete(`/api/bookmarks/${createdId}`);
+    }
   });
 
-  test("two-tap delete sends DELETE and removes the row", async ({ page }) => {
-    const before = await fetchBookmarkCount(page);
-    const id = await pickFirstRowId(page);
+  test("two-tap delete sends DELETE and removes the row", async ({
+    page,
+    request,
+  }) => {
+    const stamp = Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: `Delete Fixture ${stamp}`,
+        url: `https://delete-fixture-${stamp}.example`,
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const owned = await create.json();
 
-    const row = page.locator(`#rows tr[data-id="${id}"]`);
-    const delBtn = row.locator(".del-btn");
+    try {
+      await page.goto("/manage");
+      const before = await fetchBookmarkCount(page);
+      const row = page.locator(`#rows tr[data-id="${owned.id}"]`);
+      const delBtn = row.locator(".del-btn");
+      await expect(row).toBeVisible();
+      // Make the owned row current before clicking its off-screen delete
+      // control. Otherwise leaving the initially focused filter can scroll the
+      // normal-mode cursor back to row zero between mousedown and click.
+      await row.locator('input[data-field="title"]').focus();
 
-    // First click: row is "armed" with the .deleting class — nothing
-    // round-tripped yet.
-    await delBtn.click();
-    await expect(row).toHaveClass(/deleting/);
-    expect(await fetchBookmarkCount(page)).toBe(before);
+      // First click: row is "armed" with the .deleting class — nothing
+      // round-tripped yet.
+      await delBtn.click();
+      await expect(row).toHaveClass(/deleting/);
+      expect(await fetchBookmarkCount(page)).toBe(before);
 
-    // Second click within 2s: actual DELETE.
-    const deletePromise = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/bookmarks/${id}`) &&
-        r.request().method() === "DELETE",
-    );
-    await delBtn.click();
-    const delResp = await deletePromise;
-    expect(delResp.status()).toBe(204);
+      // Second click within 2s: actual DELETE.
+      const deletePromise = page.waitForResponse(
+        (r) =>
+          r.url().includes(`/api/bookmarks/${owned.id}`) &&
+          r.request().method() === "DELETE",
+      );
+      await delBtn.click();
+      const delResp = await deletePromise;
+      expect(delResp.status()).toBe(204);
 
-    await expect(page.locator(`#rows tr[data-id="${id}"]`)).toHaveCount(0);
-    expect(await fetchBookmarkCount(page)).toBe(before - 1);
+      await expect(page.locator(`#rows tr[data-id="${owned.id}"]`)).toHaveCount(0);
+      expect(await fetchBookmarkCount(page)).toBe(before - 1);
+    } finally {
+      // DELETE is idempotent for test cleanup; this also covers assertion
+      // failures before the UI reaches its second click.
+      await request.delete(`/api/bookmarks/${owned.id}`);
+    }
   });
 
   test("cross-link picker <-> manage navigates correctly", async ({ page }) => {
@@ -298,6 +344,271 @@ test.describe("snackpage /manage — Phase A spreadsheet view", () => {
     await page.locator(".footer .cross-link").click();
     await page.waitForURL(/\/manage$/);
     expect(new URL(page.url()).pathname).toBe("/manage");
+  });
+});
+
+test.describe("snackpage /manage — mutation stabilization", () => {
+  test("rapid cell blurs serialize PUTs and keep mode tied to focus", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: `Race Before ${suffix}`,
+        url: `https://example.com/race-before-${suffix}`,
+        tags: [`race-${suffix}`],
+      },
+    });
+    const created = await create.json();
+
+    let active = 0;
+    let maxActive = 0;
+    const bodies: Array<Record<string, unknown>> = [];
+    await page.route(`**/api/bookmarks/${created.id}`, async (route) => {
+      if (route.request().method() !== "PUT") {
+        await route.continue();
+        return;
+      }
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      bodies.push(route.request().postDataJSON());
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const response = await route.fetch();
+      active -= 1;
+      await route.fulfill({ response });
+    });
+
+    const firstPutResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/bookmarks/${created.id}`) &&
+        response.request().method() === "PUT",
+    );
+    await page.goto("/manage");
+    const row = page.locator(`tr[data-id="${created.id}"]`);
+    await row.locator('input[data-field="title"]').fill(`Race After ${suffix}`);
+    await row.locator('input[data-field="url"]').fill(`race-after-${suffix}.example/path`);
+    await row.locator('input[data-field="tags"]').focus();
+
+    // The delayed title response must not switch the page to normal mode while
+    // another cell is focused.
+    const firstPut = await firstPutResponse;
+    expect(firstPut.ok()).toBeTruthy();
+    await expect(page.locator("#manage")).toHaveAttribute("data-mode", "insert");
+
+    await expect
+      .poll(async () => (await fetchBookmark(page, created.id))?.url)
+      .toBe(`https://race-after-${suffix}.example/path`);
+    expect(bodies.length).toBeGreaterThanOrEqual(2);
+    expect(maxActive).toBe(1);
+
+    await page.unroute(`**/api/bookmarks/${created.id}`);
+    await request.delete(`/api/bookmarks/${created.id}`);
+  });
+
+  test("a draft uses one POST while later blurs queue behind creation", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    let posts = 0;
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      posts += 1;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    });
+
+    await page.goto("/manage");
+    await page.locator("#add-btn").click();
+    const draft = page.locator("#rows tr:not([data-id])").first();
+    const draftHandle = await draft.elementHandle();
+    expect(draftHandle).not.toBeNull();
+    await draft.locator('input[data-field="title"]').fill(`Queued Draft ${suffix}`);
+    await draft.locator('input[data-field="url"]').fill(`queued-${suffix}.example/path`);
+    await draft.locator('input[data-field="tags"]').fill(`queued-${suffix}`);
+    await draft.locator('input[data-field="aliases"]').fill("queued alias");
+    await page.locator("#filter").focus();
+
+    await expect
+      .poll(() => draftHandle!.evaluate((row) => row.getAttribute("data-id")))
+      .toMatch(/.+/);
+    const id = await draftHandle!.evaluate((row) => row.getAttribute("data-id"));
+    await expect
+      .poll(async () => (await fetchBookmark(page, id!))?.aliases || [])
+      .toContain("queued alias");
+    expect(posts).toBe(1);
+
+    await page.unroute("**/api/bookmarks");
+    await request.delete(`/api/bookmarks/${id}`);
+  });
+
+  test("an unknown draft outcome stops already-queued saves", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    const title = `Unknown Draft ${suffix}`;
+    let posts = 0;
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      posts += 1;
+      await route.fetch();
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: "{}",
+      });
+    });
+
+    await page.goto("/manage");
+    await page.locator("#add-btn").click();
+    const draft = page.locator("#rows tr:not([data-id])").first();
+    await draft.locator('input[data-field="title"]').fill(title);
+    await draft.locator('input[data-field="url"]').fill(`unknown-${suffix}.example`);
+    await draft.locator('input[data-field="tags"]').fill(`unknown-${suffix}`);
+    await draft.locator('input[data-field="aliases"]').fill("queued");
+    await page.locator("#filter").focus();
+
+    await expect(draft).toHaveAttribute("data-outcome-unknown", "true");
+    await expect(draft.locator("input").first()).toHaveAttribute("readonly", "");
+    await expect(draft.locator(".del-btn")).toBeDisabled();
+    await page.waitForTimeout(200);
+    expect(posts).toBe(1);
+
+    const response = await request.get("/api/bookmarks");
+    const body = await response.json();
+    const created = body.bookmarks.find((bookmark) => bookmark.title === title);
+    expect(created).toBeTruthy();
+    await page.unroute("**/api/bookmarks");
+    await request.delete(`/api/bookmarks/${created.id}`);
+  });
+
+  test("an unknown undo outcome blocks manage mutations until reload", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: `Unknown Undo ${suffix}`,
+        url: `https://example.com/unknown-undo-${suffix}`,
+        tags: [`unknown-undo-${suffix}`],
+      },
+    });
+    const created = await create.json();
+
+    await page.goto("/manage");
+    const title = page.locator(
+      `tr[data-id="${created.id}"] input[data-field="title"]`,
+    );
+    await title.click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(page.locator(`tr[data-id="${created.id}"]`)).toHaveCount(0);
+
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.abort("connectionfailed");
+      } else {
+        await route.continue();
+      }
+    });
+    await page.keyboard.press("u");
+    await expect(page.locator("#status")).toContainText("Outcome unknown");
+    await expect(page.locator("#add-btn")).toBeDisabled();
+    await expect(page.locator("#rows input").first()).toHaveAttribute("readonly", "");
+    const draftCount = await page.locator("#rows tr:not([data-id])").count();
+    await page.keyboard.press("o");
+    await expect(page.locator("#rows tr:not([data-id])")).toHaveCount(draftCount);
+  });
+
+  test("undo waits for an in-flight row creation before reversing it", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    const title = `Pending Add ${suffix}`;
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    });
+
+    await page.goto("/manage");
+    await page.locator("#add-btn").click();
+    const draft = page.locator("#rows tr:not([data-id])").first();
+    await draft.locator('input[data-field="title"]').fill(title);
+    await draft.locator('input[data-field="url"]').fill(`pending-${suffix}.example`);
+    const postResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/bookmarks") &&
+        response.request().method() === "POST",
+    );
+    const deleteResponse = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/bookmarks/") &&
+        response.request().method() === "DELETE",
+    );
+    await draft.locator('input[data-field="tags"]').focus();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("u");
+    await postResponse;
+    await deleteResponse;
+
+    await expect
+      .poll(async () => {
+        const response = await request.get("/api/bookmarks");
+        const body = await response.json();
+        return body.bookmarks.some((bookmark) => bookmark.title === title);
+      })
+      .toBeFalsy();
+  });
+
+  test("rapid delete chords issue one DELETE", async ({ page, request }) => {
+    const suffix = Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: `Single Delete ${suffix}`,
+        url: `https://example.com/single-delete-${suffix}`,
+      },
+    });
+    const created = await create.json();
+    let deletes = 0;
+    await page.route(`**/api/bookmarks/${created.id}`, async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.continue();
+        return;
+      }
+      deletes += 1;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    });
+
+    await page.goto("/manage");
+    await page
+      .locator(`tr[data-id="${created.id}"] input[data-field="title"]`)
+      .click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(page.locator(`tr[data-id="${created.id}"]`)).toHaveCount(0);
+    expect(deletes).toBe(1);
   });
 });
 
@@ -416,7 +727,7 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     await page.keyboard.press("Shift+g");
     const lastIdx = await page.evaluate(() => {
       const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
-      const visible = rows.filter((r) => r.style.display !== "none");
+      const visible = rows.filter((r) => !r.hidden);
       return visible.findIndex(
         (r) => r.getAttribute("data-current") === "true",
       );
@@ -424,7 +735,7 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     const visibleCount = await page.evaluate(
       () =>
         [...document.querySelectorAll("#rows tr")].filter(
-          (r) => (r as HTMLElement).style.display !== "none",
+          (r) => !(r as HTMLTableRowElement).hidden,
         ).length,
     );
     expect(lastIdx).toBe(visibleCount - 1);
@@ -434,7 +745,7 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     await page.keyboard.press("g");
     const firstIdx = await page.evaluate(() => {
       const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
-      const visible = rows.filter((r) => r.style.display !== "none");
+      const visible = rows.filter((r) => !r.hidden);
       return visible.findIndex(
         (r) => r.getAttribute("data-current") === "true",
       );
@@ -467,7 +778,7 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     await page.keyboard.press("Control+d");
     let idx = await page.evaluate(() => {
       const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
-      const visible = rows.filter((r) => r.style.display !== "none");
+      const visible = rows.filter((r) => !r.hidden);
       return visible.findIndex(
         (r) => r.getAttribute("data-current") === "true",
       );
@@ -478,7 +789,7 @@ test.describe("snackpage /manage — Phase B vim-modal keymap", () => {
     await page.keyboard.press("Control+u");
     idx = await page.evaluate(() => {
       const rows = [...document.querySelectorAll("#rows tr")] as HTMLElement[];
-      const visible = rows.filter((r) => r.style.display !== "none");
+      const visible = rows.filter((r) => !r.hidden);
       return visible.findIndex(
         (r) => r.getAttribute("data-current") === "true",
       );

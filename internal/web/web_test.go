@@ -12,7 +12,11 @@ func TestFS_ContainsIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			t.Errorf("close embedded file: %v", err)
+		}
+	}()
 	body, _ := io.ReadAll(f)
 	if len(body) == 0 {
 		t.Error("index.html is empty")

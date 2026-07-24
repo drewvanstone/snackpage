@@ -1,7 +1,5 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&display=swap");
-
 /* ════════════════════════════════════════════════════════════════════════
-   mono-light — colorless frosted glass, IBM Plex Mono.
+   mono-light — colorless frosted glass, system monospace.
    A structural theme in the classic-mac mold: it remaps the
    Catppuccin token names to a warm-neutral monochrome palette, then layers
    [data-theme="mono-light"] overrides that turn every surface into a single
@@ -61,7 +59,7 @@ html[data-theme="mono-light"] { font-size: 16px; }
 [data-theme="mono-light"] input,
 [data-theme="mono-light"] button,
 [data-theme="mono-light"] .manage-table {
-  font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-weight:400;
 }
 

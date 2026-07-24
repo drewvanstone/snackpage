@@ -4,24 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>snackpage</title>
-  <script>
-    // Resolve the active theme before paint to avoid FOUC.
-    //   priority: ?theme=X > localStorage.snackpageTheme > "catppuccin-mocha"
-    // A ?theme=X param is persisted into localStorage so the choice sticks
-    // across reloads. The theme <link> is appended dynamically — it lands
-    // AFTER style.css in DOM order so theme rules win cascade ties.
-    (function () {
-      var params = new URLSearchParams(location.search);
-      var theme = params.get("theme") || localStorage.getItem("snackpageTheme") || "catppuccin-mocha";
-      if (params.has("theme")) localStorage.setItem("snackpageTheme", theme);
-      document.documentElement.setAttribute("data-theme", theme);
-      var link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.id = "theme-css";
-      link.href = "/static/themes/" + theme + ".css";
-      document.head.appendChild(link);
-    })();
-  </script>
+  <script src="/static/theme-registry.js{{if .Version}}?v={{.Version}}{{end}}"></script>
+  <script src="/static/theme-bootstrap.js{{if .Version}}?v={{.Version}}{{end}}" data-version="{{.Version}}"></script>
   <link rel="stylesheet" href="/static/style.css{{if .Version}}?v={{.Version}}{{end}}">
 </head>
 <body>
@@ -29,14 +13,16 @@
     <div class="picker-title">snackpage</div>
     <div class="prompt">
       <span class="glyph">❯</span>
-      <input id="q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+      <label class="sr-only" for="q">Search bookmarks</label>
+      <input id="q" type="text" role="combobox" aria-autocomplete="list" aria-controls="list" aria-expanded="false" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
     </div>
-    <ul id="list" class="list" aria-live="polite"></ul>
+    <ul id="list" class="list" role="listbox" aria-label="Bookmark search results"></ul>
     <div class="footer">
       <span id="count"></span>
-      <span id="hints" class="hints">↑↓ select · ⏎ open · ⎋ normal mode · ? help</span>
+      <span id="hints" class="hints">↑↓ select · ⏎ open · ⎋ normal mode</span>
       <a href="/manage" class="cross-link">manage</a>
     </div>
+    <div id="status" class="status" role="status" aria-live="polite" hidden></div>
   </main>
 
   <div id="modal-root"></div>

@@ -21,11 +21,15 @@ test.describe("snackpage picker — load and render", () => {
     expect(count).toBe(0);
   });
 
-  test("count shows 0 / 100 initially (100 loaded but none rendered)", async ({
+  test("count shows zero rendered and the current API total", async ({
     page,
   }) => {
     const text = (await page.locator("#count").textContent()) ?? "";
-    expect(text.trim()).toBe("0 / 100");
+    const total = await page.evaluate(async () => {
+      const response = await fetch("/api/bookmarks");
+      return (await response.json()).bookmarks.length;
+    });
+    expect(text.trim()).toBe(`0 / ${total}`);
   });
 
   test("typing reveals matching rows", async ({ page }) => {
@@ -48,6 +52,21 @@ test.describe("snackpage picker — load and render", () => {
       () => document.querySelectorAll("#list li").length === 0
     );
     expect(await page.locator("#list li").count()).toBe(0);
+  });
+
+  test("load failures are visible instead of leaving a silent empty page", async ({
+    page,
+  }) => {
+    await page.route("**/api/bookmarks", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "test failure" }),
+      }),
+    );
+    await page.goto("/");
+    await expect(page.locator("#status")).toBeVisible();
+    await expect(page.locator("#status")).toContainText("test failure");
   });
 });
 
@@ -98,6 +117,31 @@ test.describe("snackpage picker — theming", () => {
 
     // Cleanup so later tests don't see a non-default theme.
     await page.evaluate(() => localStorage.removeItem("snackpageTheme"));
+  });
+
+  test("invalid URL and stored themes fall back without requesting arbitrary CSS", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.evaluate(() =>
+      localStorage.setItem("snackpageTheme", "../../not-a-theme"),
+    );
+    const requests: string[] = [];
+    page.on("request", (request) => requests.push(request.url()));
+
+    await page.goto("/?theme=also-not-a-theme");
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      "catppuccin-mocha",
+    );
+    expect(
+      await page.evaluate(() => localStorage.getItem("snackpageTheme")),
+    ).toBeNull();
+    expect(
+      requests
+        .filter((url) => url.includes("/static/themes/"))
+        .some((url) => url.includes("not-a-theme")),
+    ).toBeFalsy();
   });
 
   test("<Space>t opens theme picker with active theme highlighted", async ({ page }) => {
@@ -194,7 +238,7 @@ test.describe("snackpage picker — theming", () => {
       const mod = await import("/static/theme.js");
       return mod.THEMES.map((t) => t.id);
     });
-    expect(ids.length).toBe(17);
+    expect(ids.length).toBe(18);
 
     for (const id of ids) {
       await page.goto(`/?theme=${id}`);

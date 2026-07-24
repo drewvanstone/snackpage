@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,6 +19,37 @@ func TestLoadState_MissingFile(t *testing.T) {
 	}
 	if len(got.Stats) != 0 {
 		t.Errorf("len Stats = %d; want 0", len(got.Stats))
+	}
+}
+
+func TestLoadState_RejectsInconsistentStats(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{
+			name: "negative count",
+			raw:  `{"version":1,"stats":{"B7K3M2QA":{"visit_count":-1}}}`,
+		},
+		{
+			name: "visit without timestamp",
+			raw:  `{"version":1,"stats":{"B7K3M2QA":{"visit_count":1}}}`,
+		},
+		{
+			name: "timestamp without visit",
+			raw:  `{"version":1,"stats":{"B7K3M2QA":{"visit_count":0,"last_visit_at":"2026-05-23T17:12:33Z"}}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.json")
+			if err := os.WriteFile(path, []byte(tc.raw), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadState(path); !errors.Is(err, ErrValidation) {
+				t.Fatalf("loadState error = %v; want ErrValidation", err)
+			}
+		})
 	}
 }
 

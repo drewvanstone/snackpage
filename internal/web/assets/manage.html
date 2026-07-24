@@ -4,34 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>snackpage — manage</title>
-  <script>
-    // Resolve the active theme before paint to avoid FOUC.
-    //   priority: ?theme=X > localStorage.snackpageTheme > "catppuccin-mocha"
-    // A ?theme=X param is persisted into localStorage so the choice sticks
-    // across reloads. The theme <link> is appended dynamically — it lands
-    // AFTER style.css in DOM order so theme rules win cascade ties.
-    (function () {
-      var params = new URLSearchParams(location.search);
-      var theme = params.get("theme") || localStorage.getItem("snackpageTheme") || "catppuccin-mocha";
-      if (params.has("theme")) localStorage.setItem("snackpageTheme", theme);
-      document.documentElement.setAttribute("data-theme", theme);
-      var link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.id = "theme-css";
-      link.href = "/static/themes/" + theme + ".css";
-      document.head.appendChild(link);
-    })();
-  </script>
+  <script src="/static/theme-registry.js{{if .Version}}?v={{.Version}}{{end}}"></script>
+  <script src="/static/theme-bootstrap.js{{if .Version}}?v={{.Version}}{{end}}" data-version="{{.Version}}"></script>
   <link rel="stylesheet" href="/static/style.css{{if .Version}}?v={{.Version}}{{end}}">
   <link rel="stylesheet" href="/static/manage.css{{if .Version}}?v={{.Version}}{{end}}">
 </head>
 <body class="manage-body">
   <main class="manage manage-page" id="manage" data-mode="insert">
     <div class="manage-header">
-      <a href="/" class="cross-link back-link" tabindex="-1">← picker</a>
+      <a href="/" class="cross-link back-link">← picker</a>
       <span class="manage-title">snackpage / manage</span>
+      <label class="sr-only" for="filter">Filter bookmarks</label>
       <input id="filter" type="text" placeholder="filter…" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
-      <button id="add-btn" type="button" class="btn btn-primary" tabindex="-1">+ Add</button>
+      <button id="add-btn" type="button" class="btn btn-primary">+ Add</button>
     </div>
 
     <div class="manage-table-wrap">
@@ -51,8 +36,9 @@
 
     <div class="manage-footer">
       <span id="row-count"></span>
-      <span id="hints" class="manage-hints">Tab nav · ⎋ revert + normal · ⏎ save+down · ⌘⏎ open in new tab · ? help</span>
+      <span id="hints" class="manage-hints">Tab nav · ⎋ revert + normal · ⏎ save+down · ⌘⏎ open in new tab</span>
     </div>
+    <div id="status" class="status" role="status" aria-live="polite" hidden></div>
   </main>
 
   <div id="modal-root"></div>

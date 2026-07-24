@@ -4,16 +4,18 @@
 import { openThemePicker } from "./theme.js";
 
 const state = {
-  bookmarks: [],   // [{id,title,url,tags,aliases,visit_count,last_visit_at}]
+  bookmarks: [],   // [{id,title,url,tags,aliases,visit_count,last_visit_at,frecency_score}]
   view: [],        // filtered + sorted subset rendered to DOM
-  selected: 0,     // index into view
+  selectedId: null,
   mode: "insert",  // "insert" | "normal" — vim-style modal editor mode
+  mutationBlocked: false,
+  mutationInFlight: false,
   // In-memory undo stack. One entry per successful add / edit / delete.
   // Per-view: refreshing the page or switching to /manage clears it.
   // Entry shapes:
   //   { kind: "add",    id }                              — undo POSTed bookmark
   //   { kind: "edit",   id, prev: {title,url,tags,aliases} } — restore pre-edit
-  //   { kind: "delete", prev: {title,url,tags,aliases} }   — re-POST (NEW id)
+  //   { kind: "delete", id, prev: {title,url,tags,aliases} } — re-POST (NEW id)
   undoStack: [],
 };
 
@@ -22,13 +24,15 @@ const $list = document.getElementById("list");
 const $count = document.getElementById("count");
 const $picker = document.getElementById("picker");
 const $hints = document.getElementById("hints");
+const $status = document.getElementById("status");
+let lastLoadedAt = 0;
+let loadGeneration = 0;
 
 // Footer hints text per mode. The visible affordance should match what the
 // keyboard actually does: in insert you press ⎋ to leave to normal; in
-// normal you press i/a/ to return to insert, j/k navigates, and the
-// vim chords a/e/dd handle the app commands.
+// normal you press i or / to return to insert and a/e/dd run app commands.
 const HINTS = {
-  insert: "↑↓ select · ⏎ open · ⎋ normal mode · ? help",
+  insert: "↑↓ select · ⏎ open · ⎋ normal mode",
   normal: "j/k select · ⏎ open · a add · e edit · dd delete · i insert mode · ? help",
 };
 
@@ -42,22 +46,97 @@ function setMode(m) {
 $q.addEventListener("focus", () => setMode("insert"));
 $q.addEventListener("blur", () => setMode("normal"));
 
-async function load() {
-  const r = await fetch("/api/bookmarks");
-  const j = await r.json();
-  state.bookmarks = j.bookmarks || [];
-  refresh();
+function setStatus(message = "", isError = false) {
+  $status.textContent = message;
+  $status.hidden = message === "";
+  $status.classList.toggle("error", isError);
 }
 
-function refresh() {
+async function apiFetch(url, options = {}) {
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (cause) {
+    const method = String(options.method || "GET").toUpperCase();
+    if (["POST", "PUT", "DELETE"].includes(method)) {
+      const error = new Error(
+        "Connection lost while saving. Outcome unknown; reload before retrying.",
+        { cause },
+      );
+      error.unknownOutcome = true;
+      throw error;
+    }
+    throw cause;
+  }
+  const body = response.status === 204
+    ? null
+    : await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  return body;
+}
+
+function requireBookmark(body) {
+  if (
+    !body ||
+    typeof body !== "object" ||
+    typeof body.id !== "string" ||
+    body.id === "" ||
+    typeof body.title !== "string" ||
+    typeof body.url !== "string"
+  ) {
+    const error = new Error(
+      "The server accepted the request but returned an unreadable response. " +
+      "Outcome unknown; reload before retrying.",
+    );
+    error.unknownOutcome = true;
+    throw error;
+  }
+  return body;
+}
+
+async function load({ preserveSelection = true } = {}) {
+  const generation = ++loadGeneration;
+  const previousId = preserveSelection ? state.selectedId : null;
+  try {
+    const json = await apiFetch("/api/bookmarks");
+    if (generation !== loadGeneration) return;
+    if (!Array.isArray(json?.bookmarks)) {
+      throw new Error("server returned an invalid bookmark list");
+    }
+    state.bookmarks = json.bookmarks;
+    state.selectedId = previousId;
+    refresh({ resetSelection: !preserveSelection });
+    lastLoadedAt = Date.now();
+    if (state.mutationBlocked) {
+      setStatus(
+        "A previous save has an unknown outcome; reload before making more changes.",
+        true,
+      );
+    } else {
+      setStatus();
+    }
+  } catch (error) {
+    if (generation !== loadGeneration) return;
+    setStatus(`Could not load bookmarks: ${error.message}`, true);
+  }
+}
+
+function refresh({ resetSelection = false } = {}) {
   const q = $q.value.trim();
   if (q === "") {
     state.view = [];
   } else {
     state.view = fuzzyRank(q, state.bookmarks);
   }
-  if (state.selected >= state.view.length) state.selected = Math.max(0, state.view.length - 1);
-  if (state.view.length > 0 && state.selected < 0) state.selected = 0;
+  if (
+    resetSelection ||
+    !state.selectedId ||
+    !state.view.some((bookmark) => bookmark.id === state.selectedId)
+  ) {
+    state.selectedId = state.view[0]?.id || null;
+  }
   render();
 }
 
@@ -93,34 +172,24 @@ function fuzzyRank(q, items) {
   feed(tagsFinder, 2);
   feed(urlFinder, 1);
 
-  const now = Date.now();
   const ranked = [...scoreMap.values()].map(({ score, item }) => ({
     item,
-    score: score + 0.001 * frecency(item, now),
+    score: score + 0.001 * (Number(item.frecency_score) || 0),
   }));
-  ranked.sort((a, z) => z.score - a.score);
+  ranked.sort((a, z) =>
+    z.score - a.score ||
+    a.item.title.localeCompare(z.item.title) ||
+    a.item.url.localeCompare(z.item.url) ||
+    a.item.id.localeCompare(z.item.id)
+  );
   return ranked.map(r => r.item);
-}
-
-function frecency(b, now) {
-  const last = b.last_visit_at ? new Date(b.last_visit_at).getTime() : 0;
-  const visits = b.visit_count || 0;
-  let decay;
-  if (!last) {
-    decay = 0.1;
-  } else {
-    const days = Math.floor((now - last) / 86_400_000);
-    if (days <= 1) decay = 1.0;
-    else if (days <= 7) decay = 0.6;
-    else if (days <= 30) decay = 0.3;
-    else decay = 0.1;
-  }
-  return Math.max(visits, 1) * decay;
 }
 
 function relTime(iso) {
   if (!iso) return "";
-  const ms = Date.now() - new Date(iso).getTime();
+  const parsed = new Date(iso).getTime();
+  if (!Number.isFinite(parsed)) return "";
+  const ms = Math.max(0, Date.now() - parsed);
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60);
@@ -159,7 +228,10 @@ function render() {
   state.view.forEach((b, i) => {
     const li = document.createElement("li");
     li.className = "row";
-    li.setAttribute("aria-selected", i === state.selected ? "true" : "false");
+    const selected = b.id === state.selectedId;
+    li.id = `bookmark-option-${b.id}`;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", selected ? "true" : "false");
     li.dataset.id = b.id;
     // Tags are wrapped in <span class="tag"> so themes can restyle them
     // (e.g. classic-mac renders bordered chiclets). The "·" separator stays
@@ -178,9 +250,52 @@ function render() {
     $list.appendChild(li);
   });
   $count.textContent = `${state.view.length} / ${state.bookmarks.length}`;
+  $q.setAttribute("aria-expanded", String(state.view.length > 0));
+  if (state.selectedId) {
+    $q.setAttribute("aria-activedescendant", `bookmark-option-${state.selectedId}`);
+  } else {
+    $q.removeAttribute("aria-activedescendant");
+  }
 }
 
-$q.addEventListener("input", refresh);
+$q.addEventListener("input", () => refresh({ resetSelection: true }));
+
+function selectedIndex() {
+  return state.view.findIndex((bookmark) => bookmark.id === state.selectedId);
+}
+
+function selectedBookmark() {
+  return state.view.find((bookmark) => bookmark.id === state.selectedId);
+}
+
+function mutationsAllowed() {
+  if (!state.mutationBlocked) return true;
+  setStatus(
+    "A previous save has an unknown outcome; reload before making more changes.",
+    true,
+  );
+  return false;
+}
+
+async function runMutation(task) {
+  if (!mutationsAllowed() || state.mutationInFlight) return false;
+  state.mutationInFlight = true;
+  try {
+    await task();
+    return true;
+  } finally {
+    state.mutationInFlight = false;
+  }
+}
+
+function selectIndex(index) {
+  if (state.view.length === 0) {
+    state.selectedId = null;
+    return;
+  }
+  const clamped = Math.max(0, Math.min(state.view.length - 1, index));
+  state.selectedId = state.view[clamped].id;
+}
 
 function scrollSelectedIntoView() {
   const sel = $list.querySelector('[aria-selected="true"]');
@@ -189,7 +304,8 @@ function scrollSelectedIntoView() {
 
 function move(delta) {
   if (state.view.length === 0) return;
-  state.selected = (state.selected + delta + state.view.length) % state.view.length;
+  const current = Math.max(0, selectedIndex());
+  selectIndex((current + delta + state.view.length) % state.view.length);
   render();
   scrollSelectedIntoView();
 }
@@ -202,19 +318,20 @@ function pageScroll(direction) {
   if (!firstRow) return;
   const rowH = firstRow.offsetHeight || 1;
   const halfVisible = Math.max(1, Math.floor($list.clientHeight / rowH / 2));
-  state.selected = Math.max(
+  const current = Math.max(0, selectedIndex());
+  selectIndex(Math.max(
     0,
-    Math.min(state.view.length - 1, state.selected + direction * halfVisible),
-  );
+    Math.min(state.view.length - 1, current + direction * halfVisible),
+  ));
   render();
   scrollSelectedIntoView();
 }
 
 function openSelected(newTab) {
-  const b = state.view[state.selected];
+  const b = selectedBookmark();
   if (!b) return;
   const url = "/go/" + encodeURIComponent(b.id);
-  if (newTab) window.open(url, "_blank");
+  if (newTab) window.open(url, "_blank", "noopener");
   else window.location.href = url;
 }
 
@@ -239,10 +356,10 @@ const ACTIONS = {
   "nav-down":      () => move(1),
   "nav-up":        () => move(-1),
   "nav-top":       () => {
-    if (state.view.length) { state.selected = 0; render(); scrollSelectedIntoView(); }
+    if (state.view.length) { selectIndex(0); render(); scrollSelectedIntoView(); }
   },
   "nav-bottom":    () => {
-    if (state.view.length) { state.selected = state.view.length - 1; render(); scrollSelectedIntoView(); }
+    if (state.view.length) { selectIndex(state.view.length - 1); render(); scrollSelectedIntoView(); }
   },
   "open":          () => openSelected(false),
   "open-new-tab":  () => openSelected(true),
@@ -251,9 +368,14 @@ const ACTIONS = {
     const len = $q.value.length;
     $q.setSelectionRange(len, len);
   },
-  "add":           () => openModal({ title: "Add bookmark", onSave: createBookmark }),
+  "add":           () => {
+    if (mutationsAllowed() && !state.mutationInFlight) {
+      openModal({ title: "Add bookmark", onSave: createBookmark });
+    }
+  },
   "edit":          () => {
-    const b = state.view[state.selected];
+    if (!mutationsAllowed() || state.mutationInFlight) return;
+    const b = selectedBookmark();
     if (!b) return;
     openModal({
       title: "Edit bookmark",
@@ -262,11 +384,21 @@ const ACTIONS = {
     });
   },
   "delete":        () => {
-    const b = state.view[state.selected];
+    if (!mutationsAllowed()) return;
+    const b = selectedBookmark();
     if (!b) return;
-    deleteBookmark(b.id).catch((err) => alert("delete failed: " + err.message));
+    runMutation(async () => {
+      try {
+        await deleteBookmark(b.id);
+      } catch (err) {
+        if (err.unknownOutcome) state.mutationBlocked = true;
+        setStatus(`Delete failed: ${err.message}`, true);
+      }
+    });
   },
-  "undo":          () => undo(),
+  "undo":          () => {
+    runMutation(undo);
+  },
   "show-help":     () => showHelpOverlay(),
   "goto-manage":   () => { if (window.location.pathname !== "/manage") window.location.href = "/manage"; },
   "open-theme-picker": () => openThemePicker(),
@@ -344,20 +476,29 @@ function dispatchNormalKey(key, event) {
   // Otherwise the key falls through (unbound in normal mode).
 }
 
-// Global key handler — runs at capture phase so we can override input behavior.
+// Global key handler. Input behavior that belongs to the picker is handled
+// here; native controls outside the query retain their browser defaults.
 document.addEventListener("keydown", (e) => {
   // Modal handles its own keys; bail when one is open.
   if (document.querySelector(".modal-overlay")) return;
 
+  const target = e.target;
+  const nativeInteractive =
+    target instanceof Element &&
+    target !== $q &&
+    Boolean(target.closest("a, button, select, textarea, [contenteditable='true']"));
+
   // Universally-safe modifier shortcuts — both modes.
   // ⌘⏎ / Ctrl+⏎ → open selected in new tab.
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    if (nativeInteractive) return;
     e.preventDefault();
     openSelected(true);
     return;
   }
   // ⏎ (no modifier) → open selected.
   if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+    if (nativeInteractive) return;
     e.preventDefault();
     openSelected(false);
     return;
@@ -423,104 +564,217 @@ document.addEventListener("keydown", (e) => {
 $list.addEventListener("click", (e) => {
   const li = e.target.closest(".row");
   if (!li) return;
-  const idx = [...$list.children].indexOf(li);
-  if (idx >= 0) { state.selected = idx; render(); }
+  state.selectedId = li.dataset.id || null;
+  render();
 });
 
-load();
+load({ preserveSelection: false });
+reconcilePickerMode({ requestDefaultFocus: true });
+
+// Returning from /go/ via the back-forward cache or switching back to this
+// tab should refresh visit counts and server-provided frecency.
+window.addEventListener("pageshow", (event) => {
+  reconcilePickerMode();
+  if (event.persisted) load();
+});
+window.addEventListener("focus", () => {
+  if (Date.now() - lastLoadedAt > 1000) load();
+});
 
 const $modalRoot = document.getElementById("modal-root");
+let modalReturnFocus = null;
+let modalCleanup = null;
+
+function normalizeURL(value) {
+  const trimmed = value.trim();
+  return trimmed && !trimmed.includes("://") ? `https://${trimmed}` : trimmed;
+}
+
+function beginModal(markup) {
+  const returnFocus = $modalRoot.firstElementChild
+    ? modalReturnFocus
+    : document.activeElement;
+  closeModal({ restoreFocus: false });
+  modalReturnFocus = returnFocus;
+  $modalRoot.innerHTML = markup;
+
+  const dialog = $modalRoot.querySelector('[role="dialog"]');
+  const trapFocus = (event) => {
+    if (event.key !== "Tab") return;
+    const focusable = [...dialog.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    )].filter((element) => !element.hidden);
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  dialog.addEventListener("keydown", trapFocus);
+  modalCleanup = () => dialog.removeEventListener("keydown", trapFocus);
+  return dialog;
+}
 
 function openModal({ title, initial = {}, onSave }) {
-  closeModal(); // ensure single modal
-  $modalRoot.innerHTML = `
-    <div class="modal-overlay" role="dialog" aria-modal="true">
-      <div class="modal">
-        <h2><span>${escapeHTML(title)}</span><span class="esc">⎋ to cancel</span></h2>
+  const titleId = "bookmark-modal-title";
+  const dialog = beginModal(`
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="${titleId}">
+      <div class="modal" tabindex="-1">
+        <h2 id="${titleId}"><span>${escapeHTML(title)}</span><span class="esc">⎋ to cancel</span></h2>
         <div class="field">
-          <label>URL <span style="color:var(--red)">*</span></label>
-          <input id="m-url" type="text" value="${escapeHTML(initial.url || "")}" placeholder="https://…">
+          <label for="m-url">URL <span class="required" aria-hidden="true">*</span></label>
+          <input id="m-url" type="text" required aria-required="true" value="${escapeHTML(initial.url || "")}" placeholder="https://…">
           <div class="hint">required — validated as a URL on submit</div>
         </div>
         <div class="field">
-          <label>Title <span style="color:var(--red)">*</span></label>
+          <label for="m-title">Title</label>
           <input id="m-title" type="text" value="${escapeHTML(initial.title || "")}" placeholder="Team Dashboard">
           <div class="hint">defaults to URL hostname if blank</div>
         </div>
         <div class="field">
-          <label>Tags</label>
+          <label for="m-tags">Tags</label>
           <input id="m-tags" type="text" value="${escapeHTML((initial.tags || []).join(", "))}" placeholder="work, jira">
           <div class="hint">comma-separated, optional</div>
         </div>
         <div class="field">
-          <label>Aliases</label>
+          <label for="m-aliases">Aliases</label>
           <input id="m-aliases" type="text" value="${escapeHTML((initial.aliases || []).join(", "))}" placeholder="team board, sprint board">
           <div class="hint">extra fuzzy-search keywords, not shown in the list</div>
         </div>
-        <div id="m-error" class="error" style="display:none"></div>
+        <div id="m-error" class="error" role="alert" hidden></div>
         <div class="modal-footer">
           <span>Tab to cycle · ⏎ save · ⎋ cancel</span>
           <div class="actions">
-            <button id="m-cancel" class="btn">Cancel</button>
-            <button id="m-save" class="btn btn-primary">Save</button>
+            <button id="m-cancel" type="button" class="btn">Cancel</button>
+            <button id="m-save" type="button" class="btn btn-primary">Save</button>
           </div>
         </div>
       </div>
     </div>
-  `;
+  `);
 
   const $url = document.getElementById("m-url");
   const $title = document.getElementById("m-title");
   const $tags = document.getElementById("m-tags");
   const $aliases = document.getElementById("m-aliases");
   const $err = document.getElementById("m-error");
+  const $cancel = document.getElementById("m-cancel");
+  const $save = document.getElementById("m-save");
+  let submitting = false;
+  let requestPending = false;
 
   $url.focus();
   $url.select();
 
   const submit = async () => {
-    const url = $url.value.trim();
+    if (submitting || state.mutationInFlight || !mutationsAllowed()) return;
+    const url = normalizeURL($url.value);
     if (!url) { showErr("URL is required"); return; }
     let parsed;
-    try { parsed = new URL(url); } catch { showErr("URL is not valid"); return; }
+    try {
+      parsed = new URL(url);
+      if (!parsed.protocol || !parsed.host) throw new Error();
+    } catch {
+      showErr("URL is not valid");
+      return;
+    }
     const titleVal = $title.value.trim() || parsed.hostname;
     const tags = $tags.value.split(",").map(s => s.trim()).filter(Boolean);
     const aliases = $aliases.value.split(",").map(s => s.trim()).filter(Boolean);
+    submitting = true;
+    requestPending = true;
+    $cancel.disabled = true;
+    $save.disabled = true;
+    $err.hidden = true;
     try {
-      await onSave({ url, title: titleVal, tags, aliases });
-      closeModal();
+      await runMutation(() =>
+        onSave({ url, title: titleVal, tags, aliases })
+      );
+      requestPending = false;
+      if (dialog.isConnected) closeModal();
     } catch (err) {
+      requestPending = false;
       showErr(err.message || "save failed");
+      if (err.unknownOutcome) {
+        state.mutationBlocked = true;
+        setStatus(err.message, true);
+        $cancel.disabled = false;
+        $url.focus();
+      } else {
+        submitting = false;
+        $cancel.disabled = false;
+        $save.disabled = false;
+      }
     }
   };
 
-  document.getElementById("m-save").addEventListener("click", submit);
-  document.getElementById("m-cancel").addEventListener("click", closeModal);
+  $save.addEventListener("click", submit);
+  $cancel.addEventListener("click", () => {
+    if (!requestPending) closeModal();
+  });
 
-  $modalRoot.querySelector(".modal").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); closeModal(); return; }
-    if (e.key === "Enter") { e.preventDefault(); submit(); return; }
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (!requestPending) closeModal();
+      return;
+    }
+    if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) {
+      e.preventDefault();
+      submit();
+    }
   });
 
   function showErr(msg) {
     $err.textContent = msg;
-    $err.style.display = "block";
+    $err.hidden = false;
   }
 }
 
-function closeModal() {
+function closeModal({ restoreFocus = true } = {}) {
+  if (modalCleanup) modalCleanup();
+  modalCleanup = null;
   $modalRoot.innerHTML = "";
-  $q.focus();
+  const returnFocus = modalReturnFocus;
+  modalReturnFocus = null;
+  if (!restoreFocus) return;
+  if (returnFocus instanceof HTMLElement && returnFocus.isConnected) {
+    returnFocus.focus();
+  } else {
+    $q.focus();
+  }
+}
+
+function reconcilePickerMode({ requestDefaultFocus = false } = {}) {
+  const active = document.activeElement;
+  if (
+    requestDefaultFocus &&
+    (active === document.body || active === document.documentElement)
+  ) {
+    // Autofocus can be suppressed (for example in an embedded page). Make
+    // one best-effort request, then derive mode from the focus that actually
+    // exists instead of leaving the app in a stale insert state.
+    $q.focus({ preventScroll: true });
+  }
+  setMode(document.activeElement === $q ? "insert" : "normal");
 }
 
 // Keymap help overlay. Reuses #modal-root and the existing Esc-to-close
 // pattern. Read-only — no inputs, no save button.
 function showHelpOverlay() {
-  closeModal();
-  $modalRoot.innerHTML = `
-    <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-      <div class="modal">
-        <h2><span>Keyboard shortcuts</span><span class="esc">⎋ to close</span></h2>
+  const dialog = beginModal(`
+    <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div class="modal" tabindex="-1">
+        <h2 id="help-title"><span>Keyboard shortcuts</span><span class="esc">⎋ to close</span></h2>
         <div class="help-section">
           <div class="help-section-title">Insert mode</div>
           <dl class="help-list">
@@ -540,7 +794,7 @@ function showHelpOverlay() {
             <dt>G</dt><dd>bottom of list</dd>
             <dt>⏎</dt><dd>open selected</dd>
             <dt>⌘⏎ / Ctrl+⏎</dt><dd>open in new tab</dd>
-            <dt>i  a  /</dt><dd>enter insert mode</dd>
+            <dt>i  /</dt><dd>enter insert mode</dd>
             <dt>a</dt><dd>add bookmark</dd>
             <dt>e</dt><dd>edit selected</dd>
             <dt>dd</dt><dd>delete selected</dd>
@@ -558,10 +812,10 @@ function showHelpOverlay() {
         </div>
       </div>
     </div>
-  `;
+  `);
 
   document.getElementById("m-close").addEventListener("click", closeModal);
-  $modalRoot.querySelector(".modal").addEventListener("keydown", (e) => {
+  dialog.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeModal(); return; }
   });
   // Focus the close button so Esc-listener picks up keystrokes without a
@@ -570,22 +824,14 @@ function showHelpOverlay() {
 }
 
 async function createBookmark(payload) {
-  const r = await fetch("/api/bookmarks", {
+  const created = requireBookmark(await apiFetch("/api/bookmarks", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${r.status}`);
-  }
-  const created = await r.json();
-  // Push undo entry only on success (after we know the server accepted).
+  }));
   state.undoStack.push({ kind: "add", id: created.id });
+  state.selectedId = created.id;
   await load();
-  // Auto-select the newly created bookmark
-  const idx = state.view.findIndex(b => b.id === created.id);
-  if (idx >= 0) { state.selected = idx; render(); }
 }
 
 async function updateBookmark(id, payload) {
@@ -600,16 +846,13 @@ async function updateBookmark(id, payload) {
         aliases: [...(before.aliases || [])],
       }
     : null;
-  const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), {
+  requireBookmark(await apiFetch("/api/bookmarks/" + encodeURIComponent(id), {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body.error || `HTTP ${r.status}`);
-  }
+  }));
   if (prev) state.undoStack.push({ kind: "edit", id, prev });
+  state.selectedId = id;
   await load();
 }
 
@@ -626,42 +869,47 @@ async function deleteBookmark(id) {
         aliases: [...(before.aliases || [])],
       }
     : null;
-  const r = await fetch("/api/bookmarks/" + encodeURIComponent(id), { method: "DELETE" });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  if (prev) state.undoStack.push({ kind: "delete", prev });
+  await apiFetch("/api/bookmarks/" + encodeURIComponent(id), { method: "DELETE" });
+  if (prev) state.undoStack.push({ kind: "delete", id, prev });
   await load();
 }
 
-// Undo the most recent successful add / edit / delete from this view's stack.
-// Silent: the reappearing / disappearing / reverting row IS the feedback.
-// On failure (e.g. user over-undid into a stale reference), alert and stop —
-// don't auto-skip or auto-recover.
+function rekeyUndoReferences(oldId, newId) {
+  for (const item of state.undoStack) {
+    if (item.id === oldId) item.id = newId;
+  }
+  if (state.selectedId === oldId) state.selectedId = newId;
+}
+
 async function undo() {
-  if (state.undoStack.length === 0) return; // silent no-op
+  if (!mutationsAllowed()) return;
+  if (state.undoStack.length === 0) return;
   const entry = state.undoStack.pop();
   try {
     if (entry.kind === "delete") {
-      const r = await fetch("/api/bookmarks", {
+      const restored = requireBookmark(await apiFetch("/api/bookmarks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry.prev),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      }));
+      rekeyUndoReferences(entry.id, restored.id);
+      state.selectedId = restored.id;
     } else if (entry.kind === "edit") {
-      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+      requireBookmark(await apiFetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry.prev),
-      });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      }));
+      state.selectedId = entry.id;
     } else if (entry.kind === "add") {
-      const r = await fetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
+      await apiFetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
         method: "DELETE",
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
     }
     await load();
   } catch (err) {
-    alert("undo failed: " + err.message);
+    if (err.unknownOutcome) state.mutationBlocked = true;
+    else state.undoStack.push(entry);
+    setStatus(`Undo failed: ${err.message}`, true);
   }
 }

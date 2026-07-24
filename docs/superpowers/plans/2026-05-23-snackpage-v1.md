@@ -1,12 +1,18 @@
-# snackpage v1 Implementation Plan
+# snackpage v1 implementation plan (historical)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical record (completed):** This May 2026 build plan is retained to
+> explain how v1 was assembled. Its unchecked boxes, code samples, dependency
+> versions, commands, and carryover notes are not current work instructions.
+> Use the repository source, `README.md`, and `ARCHITECTURE.md` as the
+> authoritative references.
 
 **Goal:** Ship a single Go binary that runs `snackpage serve` on `127.0.0.1:8765`, exposes a keyboard-driven, snacks.nvim-inspired bookmark picker as the daily-driver new-tab page.
 
 **Architecture:** stdlib-only Go HTTP server with all assets baked in via `embed.FS`; JSON-backed bookmark + state files at `$XDG_DATA_HOME/snackpage/`; vanilla-JS frontend with `fzf-for-js` for fuzzy ranking. See `docs/superpowers/specs/2026-05-23-snackpage-design.md` for full design rationale.
 
-**Tech Stack:** Go 1.22+ (stdlib `net/http`, `log/slog`, `embed`, mux pattern routing), `fzf-for-js` (vendored), vanilla JS/HTML/CSS, Catppuccin Mocha palette, `make` for orchestration.
+**Tech Stack at drafting time:** Go 1.22+ (the current project requires Go
+1.26.1+), stdlib `net/http`, `log/slog`, `embed`, mux pattern routing;
+`fzf-for-js` (vendored); vanilla JS/HTML/CSS; Catppuccin Mocha; and `make`.
 
 **Notes on layout deviation from spec:** The spec sketched `web/` at the project root. For embed-pattern reasons (Go's `//go:embed` cannot use `..` paths), we place assets under `internal/web/assets/` with a tiny `internal/web/web.go` exposing the `embed.FS`. This is a more idiomatic Go layout and the only meaningful deviation.
 

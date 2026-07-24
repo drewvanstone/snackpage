@@ -48,47 +48,74 @@ test.describe("snackpage picker — modal flows", () => {
     expect(afterCount).toBe(beforeCount);
   });
 
-  test("Enter with valid URL submits and adds to list", async ({ page }) => {
+  test("Enter with valid URL submits and adds to list", async ({
+    page,
+    request,
+  }) => {
     // Capture the bookmarks-loaded total before the add. Empty input renders
     // 0 rows so we read it from the right side of "0 / N" in the count text.
     const before = parseTotal(await page.locator("#count").textContent());
-    await openAddModal(page);
-    await page.locator("#m-url").fill("https://example.test/new-bookmark");
-    await page.locator("#m-title").fill("Example Test Bookmark");
-    await page.keyboard.press("Enter");
-    // Modal should close
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
-    // The list-total in the footer should grow by 1 (still 0 rendered).
-    await expect
-      .poll(async () => parseTotal(await page.locator("#count").textContent()))
-      .toBe(before + 1);
-    // Type the new title to reveal the row.
-    await page.locator("#q").fill("Example Test Bookmark");
-    await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
-    );
-    const titles = await page.locator("#list .title").allTextContents();
-    expect(titles).toContain("Example Test Bookmark");
+    const stamp = Date.now();
+    let createdId = "";
+
+    try {
+      await openAddModal(page);
+      await page.locator("#m-url").fill(`https://modal-add-${stamp}.example`);
+      await page.locator("#m-title").fill(`Example Test Bookmark ${stamp}`);
+      const postPromise = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/bookmarks") &&
+          response.request().method() === "POST",
+      );
+      await page.keyboard.press("Enter");
+      const postResponse = await postPromise;
+      expect(postResponse.ok()).toBeTruthy();
+      createdId = (await postResponse.json()).id;
+
+      await expect(page.locator(".modal-overlay")).toHaveCount(0);
+      await expect
+        .poll(async () => parseTotal(await page.locator("#count").textContent()))
+        .toBe(before + 1);
+      await page.locator("#q").fill(`Example Test Bookmark ${stamp}`);
+      await expect(page.locator(`#list li[data-id="${createdId}"]`)).toBeVisible();
+    } finally {
+      if (createdId) await request.delete(`/api/bookmarks/${createdId}`);
+    }
   });
 
-  test("blank title defaults to URL hostname on submit", async ({ page }) => {
+  test("blank title defaults to URL hostname on submit", async ({
+    page,
+    request,
+  }) => {
     const before = parseTotal(await page.locator("#count").textContent());
-    await openAddModal(page);
-    await page.locator("#m-url").fill("https://hostname-default.example/path");
-    // leave title blank
-    await page.locator("#m-title").fill("");
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".modal-overlay")).toHaveCount(0);
-    await expect
-      .poll(async () => parseTotal(await page.locator("#count").textContent()))
-      .toBe(before + 1);
-    // Type the expected hostname to reveal the new row.
-    await page.locator("#q").fill("hostname-default");
-    await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
-    );
-    const titles = await page.locator("#list .title").allTextContents();
-    expect(titles).toContain("hostname-default.example");
+    const stamp = Date.now();
+    const hostname = `hostname-default-${stamp}.example`;
+    let createdId = "";
+
+    try {
+      await openAddModal(page);
+      await page.locator("#m-url").fill(`https://${hostname}/path`);
+      await page.locator("#m-title").fill("");
+      const postPromise = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/bookmarks") &&
+          response.request().method() === "POST",
+      );
+      await page.keyboard.press("Enter");
+      const postResponse = await postPromise;
+      expect(postResponse.ok()).toBeTruthy();
+      createdId = (await postResponse.json()).id;
+
+      await expect(page.locator(".modal-overlay")).toHaveCount(0);
+      await expect
+        .poll(async () => parseTotal(await page.locator("#count").textContent()))
+        .toBe(before + 1);
+      await page.locator("#q").fill(hostname);
+      await expect(page.locator(`#list li[data-id="${createdId}"] .title`))
+        .toHaveText(hostname);
+    } finally {
+      if (createdId) await request.delete(`/api/bookmarks/${createdId}`);
+    }
   });
 
   test("invalid URL shows inline error, modal stays open", async ({ page }) => {
@@ -102,6 +129,121 @@ test.describe("snackpage picker — modal flows", () => {
     await expect(err).toBeVisible();
     const errText = (await err.textContent()) ?? "";
     expect(errText.toLowerCase()).toContain("url");
+  });
+
+  test("save is single-flight and normalizes a bare URL", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    const title = `Single Flight ${suffix}`;
+    let posts = 0;
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      posts += 1;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    });
+
+    await openAddModal(page);
+    await page.locator("#m-url").fill(`single-flight-${suffix}.example/path`);
+    await page.locator("#m-title").fill(title);
+    await page.evaluate(() => {
+      const save = document.getElementById("m-save") as HTMLButtonElement;
+      save.click();
+      save.click();
+    });
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await expect
+      .poll(async () => {
+        const response = await request.get("/api/bookmarks");
+        const body = await response.json();
+        return body.bookmarks.find((bookmark) => bookmark.title === title);
+      })
+      .not.toBeUndefined();
+    expect(posts).toBe(1);
+
+    const response = await request.get("/api/bookmarks");
+    const body = await response.json();
+    const bookmark = body.bookmarks.find((candidate) => candidate.title === title);
+    expect(bookmark.url).toBe(`https://single-flight-${suffix}.example/path`);
+    await page.unroute("**/api/bookmarks");
+    await request.delete(`/api/bookmarks/${bookmark.id}`);
+  });
+
+  test("a malformed success response is surfaced as an unknown outcome", async ({
+    page,
+    request,
+  }) => {
+    const suffix = Date.now();
+    const title = `Unknown Outcome ${suffix}`;
+    let posts = 0;
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      posts += 1;
+      await route.fetch();
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: "{}",
+      });
+    });
+
+    await openAddModal(page);
+    await page.locator("#m-url").fill(`https://unknown-${suffix}.example`);
+    await page.locator("#m-title").fill(title);
+    await page.locator("#m-save").click();
+
+    await expect(page.locator(".modal-overlay")).toBeVisible();
+    await expect(page.locator("#m-error")).toContainText("Outcome unknown");
+    await expect(page.locator("#m-save")).toBeDisabled();
+    await page.locator("#m-save").evaluate((button: HTMLButtonElement) => button.click());
+    expect(posts).toBe(1);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("a");
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await expect(page.locator("#status")).toContainText("reload");
+
+    const response = await request.get("/api/bookmarks");
+    const body = await response.json();
+    const bookmark = body.bookmarks.find((candidate) => candidate.title === title);
+    expect(bookmark).toBeTruthy();
+    await page.unroute("**/api/bookmarks");
+    await request.delete(`/api/bookmarks/${bookmark.id}`);
+  });
+
+  test("a mutation transport failure blocks retries until reload", async ({
+    page,
+  }) => {
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.abort("connectionfailed");
+      } else {
+        await route.continue();
+      }
+    });
+
+    await openAddModal(page);
+    await page.locator("#m-url").fill("https://transport-failure.example");
+    await page.locator("#m-title").fill("Transport failure");
+    await page.locator("#m-save").click();
+
+    await expect(page.locator("#m-error")).toContainText("Outcome unknown");
+    await expect(page.locator("#m-save")).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("a");
+    await expect(page.locator(".modal-overlay")).toHaveCount(0);
+    await expect(page.locator("#status")).toContainText("reload");
   });
 
   test("'e' in normal mode opens Edit modal pre-filled from the selected row", async ({
@@ -129,37 +271,47 @@ test.describe("snackpage picker — modal flows", () => {
 
   test("'dd' chord in normal mode deletes the selected row", async ({
     page,
+    request,
   }) => {
-    // Need a selected row to delete — type to reveal one.
-    await page.locator("#q").fill("e");
-    await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
-    );
-    const beforeCount = await page.locator("#list li").count();
-    const id = await page
-      .locator('#list li[aria-selected="true"]')
-      .getAttribute("data-id");
-    expect(id).toBeTruthy();
+    const stamp = Date.now();
+    const title = `Modal Delete Fixture ${stamp}`;
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title,
+        url: `https://modal-delete-${stamp}.example`,
+      },
+    });
+    expect(create.ok()).toBeTruthy();
+    const owned = await create.json();
 
-    // Drop into normal mode and fire `d` `d` as a chord.
-    await page.keyboard.press("Escape");
-    await expect(page.locator("#picker")).toHaveAttribute(
-      "data-mode",
-      "normal"
-    );
+    try {
+      await page.goto("/");
+      await page.locator("#q").fill(title);
+      const selected = page.locator('#list li[aria-selected="true"]');
+      await expect(selected).toHaveAttribute("data-id", owned.id);
+      const beforeCount = await page.locator("#list li").count();
 
-    const deletePromise = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/bookmarks/${id}`) &&
-        r.request().method() === "DELETE"
-    );
-    await page.keyboard.press("d");
-    await page.keyboard.press("d");
-    const delResp = await deletePromise;
-    expect(delResp.status()).toBe(204);
+      // Drop into normal mode and fire `d` `d` as a chord.
+      await page.keyboard.press("Escape");
+      await expect(page.locator("#picker")).toHaveAttribute(
+        "data-mode",
+        "normal"
+      );
 
-    // Row gone, list count decreased.
-    await expect(page.locator(`#list li[data-id="${id}"]`)).toHaveCount(0);
-    await expect(page.locator("#list li")).toHaveCount(beforeCount - 1);
+      const deletePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes(`/api/bookmarks/${owned.id}`) &&
+          response.request().method() === "DELETE"
+      );
+      await page.keyboard.press("d");
+      await page.keyboard.press("d");
+      const deleteResponse = await deletePromise;
+      expect(deleteResponse.status()).toBe(204);
+
+      await expect(page.locator(`#list li[data-id="${owned.id}"]`)).toHaveCount(0);
+      await expect(page.locator("#list li")).toHaveCount(beforeCount - 1);
+    } finally {
+      await request.delete(`/api/bookmarks/${owned.id}`);
+    }
   });
 });

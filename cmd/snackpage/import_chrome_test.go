@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -172,5 +175,70 @@ func TestFormatProfileIdentity(t *testing.T) {
 		if got := formatProfileIdentity(tc.in); got != tc.want {
 			t.Errorf("for %+v: got %q; want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestRunImportChromeDryRunDoesNotCreateDataDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing")
+	code := runImportChrome([]string{
+		"--path", filepath.Join("testdata", "chrome-bookmarks-sample.json"),
+		"--data-dir", dir,
+		"--offline",
+		"--dry-run",
+	})
+	if code != 0 {
+		t.Fatalf("runImportChrome code = %d; want 0", code)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created data directory or returned unexpected stat error: %v", err)
+	}
+}
+
+func TestRunImportChromeUsesOneDaemonBatch(t *testing.T) {
+	requests := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPost || r.URL.Path != "/api/bookmarks/batch" {
+			t.Errorf("request = %s %s; want POST /api/bookmarks/batch", r.Method, r.URL.Path)
+		}
+		var body struct {
+			Bookmarks        []bookmarkPayload `json:"bookmarks"`
+			SkipExistingURLs bool              `json:"skip_existing_urls"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if len(body.Bookmarks) != 5 || !body.SkipExistingURLs {
+			t.Errorf("batch = %+v; want 5 bookmarks with skip_existing_urls", body)
+		}
+		created := make([]map[string]string, len(body.Bookmarks))
+		for i := range created {
+			created[i] = map[string]string{"id": "0000000" + string(rune('A'+i))}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"created":          created,
+			"skipped_existing": 0,
+		}); err != nil {
+			t.Errorf("encode response: %v", err)
+		}
+	}))
+	defer ts.Close()
+
+	dir := filepath.Join(t.TempDir(), "must-not-be-created")
+	code := runImportChrome([]string{
+		"--path", filepath.Join("testdata", "chrome-bookmarks-sample.json"),
+		"--addr", strings.TrimPrefix(ts.URL, "http://"),
+		"--data-dir", dir,
+	})
+	if code != 0 {
+		t.Fatalf("runImportChrome code = %d; want 0", code)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d; want exactly one batch request", requests)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("successful API import touched direct data dir: %v", err)
 	}
 }

@@ -121,6 +121,31 @@ test.describe("snackpage theme picker", () => {
     expect(focusedId).toBe("theme-q");
   });
 
+  test("click and Tab keep focus and theme-picker mode in sync", async ({
+    page,
+  }) => {
+    await openThemePicker(page);
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".theme-picker-overlay")).toHaveAttribute(
+      "data-mode",
+      "normal",
+    );
+
+    await page.locator("#theme-q").click();
+    await expect(page.locator(".theme-picker-overlay")).toHaveAttribute(
+      "data-mode",
+      "insert",
+    );
+
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".theme-picker-overlay")).toHaveAttribute(
+      "data-mode",
+      "insert",
+    );
+    await expect(page.locator("#theme-q")).toBeFocused();
+  });
+
   test("Esc from normal closes the picker and reverts the preview", async ({
     page,
   }) => {

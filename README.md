@@ -1,20 +1,25 @@
 # snackpage
 
-A keyboard-driven, snacks.nvim-inspired bookmark picker served from `localhost`. Built to be your default browser new-tab page so that **Cmd+T → type → Enter** reaches any saved URL in under two seconds.
+A small, keyboard-driven bookmark start page that runs entirely on your
+machine. Make it your browser's new-tab page, type a few characters, and press
+Enter.
 
-[v1 design spec](docs/superpowers/specs/2026-05-23-snackpage-design.md)
+snackpage is a single Go binary with an embedded vanilla-JavaScript frontend.
+Bookmarks are stored as readable JSON; there is no account, cloud service,
+telemetry, or runtime network dependency.
 
 ## Install
 
-Requires Go 1.22+.
+snackpage supports macOS and Linux and requires Go 1.26.1 or newer.
 
 ```bash
 git clone https://github.com/drewvanstone/snackpage.git
 cd snackpage
-make install            # installs to ~/.local/bin/snackpage
+make install
 ```
 
-Ensure `~/.local/bin` is on your `$PATH`.
+This installs `snackpage` to `~/.local/bin` by default. Set `PREFIX` to choose
+another prefix, and ensure its `bin` directory is on your `PATH`.
 
 ## Run
 
@@ -23,231 +28,345 @@ snackpage serve
 # listening on 127.0.0.1:8765
 ```
 
-First run creates `$XDG_DATA_HOME/snackpage/` (defaults to `~/.local/share/snackpage/`) with empty `bookmarks.json` and `state.json`.
+Open `http://127.0.0.1:8765`. The server accepts loopback addresses only
+because it intentionally has no authentication or TLS.
 
-Override the data dir with `--data-dir PATH`, the address with `--addr HOST:PORT`, and the log level with `--log-level debug|info|warn|error`. Pass `--dev` to disable browser caching on every static asset and rendered page — useful when iterating on the frontend with `make dev` (which sets it automatically).
+At startup, snackpage creates the data directory and initializes both JSON
+files when they are missing:
+
+```text
+$XDG_DATA_HOME/snackpage/        # ~/.local/share/snackpage by default
+├── .snackpage.lock              # exclusive writer lock
+├── bookmarks.json               # canonical bookmark library
+└── state.json                   # volatile visit statistics
+```
+
+Use `--data-dir PATH` to override the data directory, `--addr HOST:PORT` to
+change the loopback listener, and `--log-level debug|info|warn|error` to set
+logging. `--dev` disables browser caching for local frontend work.
+
+Only one snackpage process may own a data directory at a time. A second daemon
+or an offline CLI write exits without changing the files.
 
 ### Demo
-
-Try snackpage without committing real bookmarks:
 
 ```bash
 snackpage demo
 ```
 
-Seeds 100 well-known sites (Google, GitHub, Wikipedia, etc.) with a deterministic pseudo-random visit history into a tempdir and serves the picker. The tempdir is removed on shutdown — `$XDG_DATA_HOME/snackpage/` is never touched.
+Demo mode seeds 100 bookmarks in a temporary directory, serves them, and
+removes the directory on shutdown. It never touches your normal data.
 
-### Adding from the command line
+## Add and import bookmarks
 
-Add a single bookmark from your shell:
+Add one bookmark from the shell:
 
 ```bash
-snackpage add https://example.com --title "Example" --tags work,demo --aliases ex
+snackpage add example.com --title "Example" --tags work,demo --aliases ex
 ```
 
-If a snackpage daemon is running, the add goes through its API (so the picker updates immediately). If no daemon is running, the bookmark is written directly to `$XDG_DATA_HOME/snackpage/bookmarks.json`. Either way, the result is the same.
+Bare hostnames are normalized to `https://`. By default, the CLI sends the
+mutation to the daemon at `127.0.0.1:8765`. If that exact address refuses the
+connection, it acquires the data-directory lock and writes offline. A timeout,
+reset connection, or malformed success response is reported as an unknown
+outcome and is never retried directly, preventing accidental duplicates.
 
-### Importing from Chrome
-
-Bulk-import your existing Chrome bookmarks:
+Use a non-default daemon address with `--addr`. To intentionally bypass the
+HTTP API, first stop the daemon and pass `--offline`:
 
 ```bash
-# Preview what would be imported
+snackpage add example.com --offline
+```
+
+Import Chrome bookmarks in one atomic batch:
+
+```bash
+# Preview only
 snackpage import chrome --dry-run
 
-# Do it
+# Import through the running daemon
 snackpage import chrome
 
-# Limit to a single folder
+# Other common options
 snackpage import chrome --folder "Bookmarks bar/Dev"
-
-# Different profile
 snackpage import chrome --profile "Profile 2"
+snackpage import chrome --addr 127.0.0.1:9999
+
+# Explicit direct write; the daemon must be stopped
+snackpage import chrome --offline
 ```
 
-Each Chrome bookmark's immediate-parent folder name becomes its tag (lowercased). URLs that already exist in snackpage are skipped — so re-running is idempotent.
+The immediate parent folder becomes a lowercase tag. Existing URLs and
+duplicates within the Chrome source are skipped, so rerunning an import is
+idempotent. Chrome entries with an empty title or invalid URL are reported and
+ignored before the remaining valid entries are submitted as one atomic batch.
+If that batch cannot be committed, none of it is written.
 
-Supported on macOS (`~/Library/Application Support/Google/Chrome/<profile>/Bookmarks`) and Linux (`~/.config/google-chrome/<profile>/Bookmarks`). Use `--path` to point at the Bookmarks file directly on other platforms.
+Chrome bookmark discovery supports:
 
-## Point your browser at it
+- macOS: `~/Library/Application Support/Google/Chrome/<profile>/Bookmarks`
+- Linux: `~/.config/google-chrome/<profile>/Bookmarks`
 
-`snackpage` serves at `http://127.0.0.1:8765`. The trick is making **Cmd+T** open it instead of the browser's default new-tab page.
+Use `--path FILE` to select a file explicitly.
 
-### Chrome / Brave / Edge
+## Make it the new-tab page
 
-Chrome's "On startup" setting controls cold-launch only — it does **not** override `Cmd+T`. You have two options:
+snackpage's default URL is `http://127.0.0.1:8765`.
 
-**Option A: Use a "New Tab Redirect" extension.**
+### Chrome, Brave, and Edge
 
-1. Install from the Chrome Web Store: search for "New Tab Redirect" by Justin Henry (or any reputable equivalent — the manifest is trivial).
-2. Set the redirect URL to `http://127.0.0.1:8765`.
-3. Cmd+T → snackpage.
+Install a reputable new-tab redirect extension and set its target to the
+snackpage URL. The browser's “On startup” preference does not change new tabs.
 
-**Option B: Set the `NewTabPageLocation` Chrome policy.**
-
-```bash
-defaults write com.google.Chrome NewTabPageLocation -string "http://127.0.0.1:8765/"
-# fully quit and relaunch Chrome
-```
-
-This is enterprise policy territory. If your Chrome is managed by your employer, IT policy may override `defaults` settings — verify in `chrome://policy` that `NewTabPageLocation` is `Set by the user`. If it shows `Mandatory` or `Recommended` from your platform policy, use Option A.
-
-### Safari / Vivaldi (native, no extension)
-
-Safari: *Preferences → General → New tabs open with: Homepage*. Set Homepage to `http://127.0.0.1:8765`.
-
-Vivaldi: *Settings → Startup → Start Page → Specific page*. Set to `http://127.0.0.1:8765`.
+Chrome's `NewTabPageLocation` is an enterprise-managed policy on macOS; a
+normal `defaults write` command does not install a valid managed policy. If
+your organization manages Chrome, an administrator can deploy the policy and
+you can verify it at `chrome://policy`. Otherwise, use an extension.
 
 ### Firefox
 
-Install [New Tab Override](https://addons.mozilla.org/firefox/addon/new-tab-override/) and set the URL to `http://127.0.0.1:8765`.
+Install a reputable new-tab override extension, such as
+[New Tab Override](https://addons.mozilla.org/firefox/addon/new-tab-override/),
+and set the snackpage URL.
 
-## Use
+### Safari and Vivaldi
 
-### Modes
+- Safari: set the homepage to the snackpage URL, then choose “Homepage” for
+  new tabs.
+- Vivaldi: set the start page to the snackpage URL in Startup settings.
 
-snackpage is a vim-style modal editor:
+## Use the picker
 
-- **Insert** (default on page load): typing filters the list, search input is focused, prompt glyph is yellow.
-- **Normal** (after `Esc`): input blurred but query preserved, vim chords navigate and command, prompt glyph is mauve.
+The picker has two modes:
 
-Toggle with `Esc` (insert → normal) and `i` / `a` / `/` (normal → insert).
+- **Insert mode** is active on page load. Typing filters bookmarks.
+- **Normal mode** begins when you press `Esc`. Vim-style commands become
+  active while the query remains visible.
 
-The list starts empty — type to filter. Backspacing back to empty hides the list again. snackpage is a launcher, not a bookmark browser; the first keystroke is the point.
+An empty query hides the result list; snackpage is a launcher, not a bookmark
+browser. Matching covers title, aliases, tags, and URL. Fuzzy match quality is
+primary, with server-computed frecency and alphabetical title used for stable
+tie-breaking.
 
-### Keyboard shortcuts
+### Picker keyboard map
 
 | Keys | Context | Action |
 |---|---|---|
-| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | any | Move selection |
-| `Ctrl+D` / `Ctrl+U` | any | Half-page down / up |
-| `⏎` | any | Open selected (replaces current tab) |
-| `⌘⏎` / `Ctrl+⏎` | any | Open in a new tab |
-| `⎋` | insert | Enter normal mode (preserves query) |
-| `i` / `a` / `/` | normal | Enter insert mode |
+| `↑` / `↓` / `Ctrl+N` / `Ctrl+P` | either mode | Move selection |
+| `Ctrl+D` / `Ctrl+U` | either mode | Half-page down / up |
+| `Enter` | either mode | Open selected in the current tab |
+| `Cmd+Enter` / `Ctrl+Enter` | either mode | Open selected in a new tab |
+| `Esc` | insert | Enter normal mode and preserve the query |
+| `i` / `/` | normal | Enter insert mode |
 | `j` / `k` | normal | Move selection |
-| `g` `g` | normal | Top of list |
-| `G` | normal | Bottom of list |
+| `g g` / `G` | normal | First / last result |
 | `a` | normal | Add bookmark |
-| `e` | normal | Edit selected |
-| `d` `d` | normal | Delete selected |
-| `u` | normal | Undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
-| `?` | normal | Show keymap help overlay |
-| `<Space>` `m` | normal | Jump to `/manage` |
-| `<Space>` `t` | normal | Open theme picker |
-| `Tab` / `Shift+Tab` | modal | Cycle fields |
-| `⏎` | modal | Save |
-| `⎋` | modal | Cancel |
+| `e` | normal | Edit selected bookmark |
+| `d d` | normal | Delete selected bookmark |
+| `u` | normal | Undo the last add, edit, or delete |
+| `?` | normal | Open keyboard help |
+| `Space m` | normal | Open the manage view |
+| `Space t` | normal | Open the theme picker |
+| `Tab` / `Shift+Tab` | dialog | Cycle controls |
+| `Enter` / `Esc` | dialog | Save / cancel |
 
-`<Space>` is the leader prefix. Bound today: `<Space>m` (jump to `/manage`), `<Space>t` (open theme picker). More chords (reload, etc.) come in v3.
+Undo history is in memory for the current page and is cleared by a reload.
+Mutations are single-flight. If the connection fails after a request starts
+and snackpage cannot know whether it committed, the page blocks further writes
+and asks you to reload instead of risking a duplicate retry.
 
-### Theming
+## Manage bookmarks
 
-snackpage ships 18 built-in themes:
+Open `http://127.0.0.1:8765/manage` for a spreadsheet-style view.
 
-**Defaults / design-driven:**
-- `catppuccin-mocha` (default) — dark, mauve accents, modern
-- `classic-mac` — monochrome System-6 throwback (striped titlebar, stippled gray desktop, hard borders)
-- `mono-light` — frosted-glass monochrome with IBM Plex Mono
+- Click or tab into a cell to edit it. Blur saves automatically.
+- `Enter` saves and moves to the same column in the next row.
+- `Esc` reverts the current cell and returns to normal mode.
+- The filter fuzzy-matches title, URL, tags, and aliases.
+- `+ Add` inserts a draft row.
+- The delete button requires a second click within two seconds; `d d` is the
+  keyboard confirmation.
+- Modifier-clicking a URL opens it in a new tab.
+- Row saves are serialized; delete and undo briefly lock editing while their
+  result is being reconciled.
 
-**Dark:**
-- `dracula` · `gruvbox-dark-medium` · `nord` · `tokyo-night` · `one-dark` · `solarized-dark` · `tomorrow-night` · `monokai` · `rose-pine` · `everforest-dark` · `kanagawa` · `github-dark`
-
-**Light:**
-- `catppuccin-latte` · `solarized-light` · `github-light`
-
-Switch via `<Space>t` in normal mode (opens a picker with live preview), via `?theme=<id>` in the URL (one-off), or via `localStorage.snackpageTheme = "<id>"` (persisted). The choice is remembered across reloads and applies to both the picker (`/`) and manage view (`/manage`).
-
-Custom user themes — drop a CSS file into `$XDG_CONFIG_HOME/snackpage/themes/` and select it by name — are planned for a later release.
-
-### Manage view
-
-Visit `http://localhost:8765/manage` for a spreadsheet-style table of all bookmarks. Useful after a Chrome import drops 60+ rows with mediocre auto-tags and you want to clean them up in bulk. `u` undoes the last change, which is where it shines — bulk edits get a per-row safety net.
-
-- **Edit:** click any cell or Tab into it. Edits save automatically when you blur the cell (Tab away or click elsewhere). `Enter` saves the cell and jumps to the same column in the next row.
-- **Revert:** press `Esc` inside a cell to restore its pre-edit value without saving.
-- **Filter:** the filter input at the top is the first tab-stop. Fuzzy-matches across title / URL / tags / aliases; non-matching rows are hidden but kept in the DOM so in-flight edits aren't lost.
-- **Add:** click `+ Add` (or press `o` / `O` in normal mode) to insert a draft row; fill in title and URL, blur, and the bookmark is created.
-- **Delete:** click `✕` to arm the row (it turns red); click `✕` again within 2 seconds to confirm. Or use `dd` in normal mode — the chord IS the confirmation.
-- **Undo:** `u` in normal mode reverses the last add / edit / delete. The stack lives in this view's memory only; refreshing or hopping to the picker resets it. Restored deletes get a fresh server id (the old one is gone).
-- **Validation:** invalid URLs get a red outline; the cell stays in `.invalid` until you fix it or press `Esc` to revert.
-- **Open URL:** `⌘+click` (Ctrl+click on Linux) on a URL cell opens that bookmark in a new tab, like a regular link. Plain click still focuses the cell for editing.
-
-Normal-mode keymap (Esc out of any cell or the filter to enter normal mode):
+### Manage keyboard map
 
 | Keys | Action |
 |---|---|
-| `h` / `j` / `k` / `l` | cell ← / row ↓ / row ↑ / cell → |
-| `Ctrl+D` / `Ctrl+U` | half-page row scroll |
-| `g` `g` / `G` | first / last row |
-| `i` / `⏎` | edit current cell |
-| `a` | edit, cursor at end |
-| `o` / `O` | new row below / above |
-| `d` `d` | delete current row |
-| `u` | undo last add/edit/delete (per-view in-memory; restored deletes get a new id) |
-| `/` | focus filter |
-| `?` | help overlay |
-| `<Space>` `p` | jump back to picker (`/`) |
-| `<Space>` `t` | open theme picker |
+| `h` / `j` / `k` / `l` | Cell left / row down / row up / cell right |
+| `Ctrl+D` / `Ctrl+U` | Half-page row scroll |
+| `g g` / `G` | First / last row |
+| `i` / `Enter` | Edit the current cell |
+| `a` | Edit with the cursor at the end |
+| `o` / `O` | Add a row below / above |
+| `d d` | Delete the current row |
+| `u` | Undo the last add, edit, or delete |
+| `/` | Focus the filter |
+| `?` | Open keyboard help |
+| `Space p` | Return to the picker |
+| `Space t` | Open the theme picker |
 
-Cross-link: `<Space>m` in the picker jumps to `/manage`; `<Space>p` in the manage view jumps back to `/`. Visible links (`manage` in picker footer, `← picker` in manage header) work too.
+## Themes
 
-## Storage
+Press `Space t` in normal mode to preview and select one of 18 bundled themes:
 
-```
-$XDG_DATA_HOME/snackpage/                     # default: ~/.local/share/snackpage/
-├── bookmarks.json   # canonical, hand-editable, version-headered, diff-friendly
-└── state.json       # visit counts and last-visit timestamps (churns rapidly)
-```
+- Design-driven: Catppuccin Mocha (default), Classic Mac, Mono Light
+- Dark: Dracula, Gruvbox Dark Medium, Nord, Tokyo Night, One Dark, Solarized
+  Dark, Tomorrow Night, Monokai, Rosé Pine, Everforest Dark, Kanagawa, GitHub
+  Dark
+- Light: Catppuccin Latte, Solarized Light, GitHub Light
 
-`bookmarks.json` is the only file you care about for portability. `state.json` is derivable (visit counts re-accumulate as you use snackpage) so backing it up is optional.
+The selection is validated and saved in browser local storage. A valid
+`?theme=<id>` URL parameter selects and saves that theme. All fonts, styles,
+scripts, and theme assets are embedded; changing themes makes no external
+request.
 
-### Backup & restore
+## Storage, backup, and manual edits
 
-The on-disk format is plain JSON — back up however you back up dotfiles.
+`bookmarks.json` is canonical, versioned, indented, and ordered for readable
+diffs. `state.json` contains best-effort visit counts and timestamps; it is
+safe to omit from backups.
 
-**Manual copy:**
+Writes use a unique temporary file, file `fsync`, atomic rename, and directory
+`fsync`. Canonical mutations are copy-on-write: a failed save leaves the
+in-memory and on-disk bookmark set unchanged. Future schema versions are
+rejected without rewriting them.
+
+Rename is the logical commit point. If the following directory `fsync` fails,
+snackpage logs a crash-durability warning but does not report the already
+committed mutation as retryable, which could otherwise duplicate an add.
+
+Malformed or semantically invalid schema-v1 `bookmarks.json` stops startup so
+canonical data is never discarded. Because statistics are disposable, a
+writable store open (daemon or offline CLI) copies an invalid schema-v1
+`state.json` byte-for-byte to a unique `state.json.recovery-*` sibling, resets
+it to empty schema-v1 state, and continues. A future-version state file is
+still left untouched and rejected. Read-only dry runs treat invalid
+current-version state as empty without creating or changing any file.
+
+Copying `bookmarks.json` for backup is safe while snackpage runs because the
+published file is always complete. Restoring, hand-editing, `git pull`, or
+allowing Syncthing/iCloud/Dropbox to replace the file must happen only while
+the daemon is stopped. The daemon holds an in-memory snapshot and deliberately
+does not attempt live merge or conflict resolution. If the file changes
+behind a running daemon, its next canonical mutation reports a conflict
+instead of overwriting the external change.
+
+Example backup:
 
 ```bash
-cp ~/.local/share/snackpage/bookmarks.json ~/backups/snackpage-$(date +%F).json
+cp ~/.local/share/snackpage/bookmarks.json \
+  ~/backups/snackpage-$(date +%F).json
 ```
 
-**Tracked in git** (the most idiomatic approach for a small JSON file):
-
-```bash
-cd ~/.local/share/snackpage
-git init && git add bookmarks.json && git commit -m "initial"
-# add a remote (private repo recommended) and push
-```
-
-`bookmarks.json` is written atomically (`write-tmp → fsync → rename`) and indented for readable diffs, so each commit shows exactly what changed since the last one.
-
-**Continuous sync across workstations:** symlink the data dir into Syncthing / iCloud / Dropbox, OR keep the git-tracked dir and pull from a private remote. Both work; the git approach gives you history for free.
-
-To **restore** on a new machine: drop `bookmarks.json` into `~/.local/share/snackpage/` before launching snackpage. The daemon picks it up on next start. `state.json` is regenerated automatically as you use the picker.
+To restore, stop snackpage, replace `bookmarks.json`, then start it again. A
+missing `state.json` is recreated with empty statistics.
 
 ## Development
 
+Go 1.26.1+ is required. Browser tests use Node 24 LTS (pinned in `.nvmrc`) and
+Playwright 1.61.
+
 ```bash
-make help          # list targets
-make test          # Go unit + integration tests with race detector
-make lint          # go vet (+ golangci-lint if installed)
-make fmt           # gofmt -s -w
-make dev           # build and serve against .dev/ on :8766 with --dev (no cache)
-make dev-demo      # like dev but seeded with 100 demo bookmarks
-make dev-stop      # SIGTERM whatever is listening on :8766 (idempotent)
-make dev-restart   # dev-stop then dev
-make install       # install to $(PREFIX)/bin (default ~/.local/bin)
+make help                   # show every target
+make format-check           # verify gofmt -s
+make lint                   # go vet + required golangci-lint
+make test                   # Go tests with race detector and coverage
+make e2e                    # fresh-daemon HTTP smoke test
+make setup-frontend         # npm ci + install all Playwright browsers
+make test-frontend          # full Chromium suite, one worker
+make test-frontend-smoke    # read-only Firefox and WebKit smoke tests
+make check                  # all local quality gates
 ```
 
-Make targets always bind `127.0.0.1:8766` and the isolated `.dev/` data dir — never the installed daemon's `127.0.0.1:8765` + `$XDG_DATA_HOME/snackpage/`. If you want to test a freshly-built binary against real bookmarks, run `./snackpage serve` by hand after stopping the installed service. `DEV_PORT` is overridable, so `make DEV_PORT=9999 dev` lets a second dev instance coexist.
+Development servers are isolated from real data:
+
+```bash
+make dev                    # .dev/ on 127.0.0.1:8766
+make dev-demo               # same, with demo bookmarks
+make dev-add URL=example.com TITLE=Example
+make dev-stop               # stops only the recorded dev PID
+make dev-restart
+```
+
+Override the development port with `DEV_PORT=9999`. To run a second dev
+instance concurrently, give it a distinct locked data directory too, for
+example `make DEV_PORT=9999 DEV_DIR=.dev/9999 dev`. `make dev-stop` validates
+the recorded command before sending a signal; it never kills an arbitrary
+process merely because that process owns the port.
+
+CI runs the race-enabled Go suite on macOS and Linux, plus format, lint, HTTP
+E2E, full Chromium, and read-only Firefox/WebKit coverage on Ubuntu.
+Playwright chooses a collision-resistant port per process; set
+`SNACKPAGE_PLAYWRIGHT_PORT` to force one while debugging.
+
+## Release
+
+Releases are published from a clean, committed `main` branch. By default the
+workflow selects the next minor version after the latest stable tag published
+on `origin` and resets the patch component, so `v1.8.5` becomes `v1.9.0`:
+
+```bash
+make release-plan
+make release
+```
+
+Pass `VERSION` only when intentionally choosing a different stable version:
+
+```bash
+make release-plan VERSION=1.8.6
+make release VERSION=1.8.6
+```
+
+The release target runs `make check` before it changes any remote state. It
+then creates and pushes the annotated tag, creates a GitHub release, calculates
+the published archive checksum, updates and pushes
+`drewvanstone/homebrew-tap`, upgrades the installed Homebrew formula, restarts
+the service, and verifies both its version and health endpoint.
+
+The target never stages or commits source changes. It requires all intended
+project files to be committed, while allowing local untracked files beneath
+`.claude/`. It also refuses a dirty, diverged, or unexpectedly ahead Homebrew
+tap, a version that is not newer than the latest stable tag, or a release with
+no new commit. Git-local locks prevent two release runs from sharing either
+checkout. Remote release stages are detected on rerun, so the same command can
+resume after a transient GitHub, network, or Homebrew failure. Formula changes
+made before a failed tap commit are restored automatically. Once publication
+begins, do not amend, rebase, or advance the source checkout until the workflow
+finishes; a retry requires the existing tag and `HEAD` to resolve to the same
+commit.
+
+Immediately before remote publication, the selected version and source commit
+are recorded in `.git/snackpage-release-version`. A failed run leaves that
+local marker so plain `make release` resumes the same version and commit
+instead of selecting another minor bump. The marker is removed after the
+release, installation, restart, and health verification all succeed.
+
+Release prerequisites are `git`, authenticated `gh`, Homebrew with the
+`drewvanstone/tap` tap installed, Ruby, and the complete development/browser
+test toolchain used by `make check`. The source and tap remotes must be
+writable. The tap checkout must be on `main`, clean, and synchronized with
+`origin/main`. The workflow publishes only stable `X.Y.Z` versions.
+
+`make release-plan` is an informational preview based on local tags (or an
+in-progress release marker). It deliberately makes no network request and does
+not validate credentials or checkout state. The real target fetches `origin`
+and recalculates the automatic version from its published stable tags before
+performing the release checks.
 
 ## Architecture
 
-A single Go binary embeds the entire frontend via `go:embed`. `internal/server` is stdlib `net/http` with mux pattern routing. `internal/store` is a JSON-on-disk store with atomic writes and an in-memory facade. `internal/frecency` is a pure scoring function. The frontend is vanilla JS using a vendored copy of [fzf-for-js](https://github.com/ajitid/fzf-for-js) for ranking.
+The Go server uses `net/http`; `internal/store` owns the locked JSON snapshot;
+and `internal/web` embeds the dependency-free runtime frontend. The HTTP API is
+the mutation boundary while the daemon runs. See [ARCHITECTURE.md](ARCHITECTURE.md)
+for data flow, consistency guarantees, API routes, and extension points.
 
-See [`docs/superpowers/specs/2026-05-23-snackpage-design.md`](docs/superpowers/specs/2026-05-23-snackpage-design.md) for full design rationale and the v2+ roadmap.
+The original [v1 design](docs/superpowers/specs/2026-05-23-snackpage-design.md)
+and [implementation plan](docs/superpowers/plans/2026-05-23-snackpage-v1.md)
+are retained as historical records and are not current operating instructions.
 
 ## License
 
-MIT. See `NOTICE` for third-party attributions.
+snackpage is MIT licensed. The bundled `fzf-for-js` attribution and complete
+BSD 3-Clause license text are in [NOTICE](NOTICE).

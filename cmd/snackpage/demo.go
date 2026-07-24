@@ -4,16 +4,12 @@
 package main
 
 import (
-	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/drewvanstone/snackpage/internal/server"
@@ -31,7 +27,7 @@ func runDemo(args []string) int {
 	fs := flag.NewFlagSet("demo", flag.ExitOnError)
 	addr := fs.String("addr", "127.0.0.1:8765", "address to listen on")
 	logLevel := fs.String("log-level", "info", "debug|info|warn|error")
-	dev := fs.Bool("dev", false, "dev mode: disable HTTP caching on /static and HTML so reloads pick up rebuilt assets")
+	dev := fs.Bool("dev", false, "dev mode: disable static-asset caching")
 	_ = fs.Parse(args)
 
 	level, err := parseLevel(*logLevel)
@@ -40,13 +36,21 @@ func runDemo(args []string) int {
 		return 2
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	if err := validateLoopbackAddress(*addr); err != nil {
+		logger.Error("invalid_listen_address", "addr", *addr, "err", err)
+		return 2
+	}
 
 	dir, err := os.MkdirTemp("", "snackpage-demo-*")
 	if err != nil {
 		logger.Error("tempdir_failed", "err", err)
 		return 1
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			logger.Error("tempdir_cleanup_failed", "path", dir, "err", err)
+		}
+	}()
 	logger.Info("demo_data_dir", "path", dir)
 
 	st, err := store.New(dir)
@@ -54,6 +58,11 @@ func runDemo(args []string) int {
 		logger.Error("store_open_failed", "err", err)
 		return 1
 	}
+	defer func() {
+		if err := st.Close(); err != nil {
+			logger.Error("store_close_failed", "err", err)
+		}
+	}()
 
 	if err := seedDemo(st); err != nil {
 		logger.Error("seed_failed", "err", err)
@@ -65,28 +74,19 @@ func runDemo(args []string) int {
 		Addr:              *addr,
 		Handler:           server.New(st, logger, server.Options{Dev: *dev, Version: version}).Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	go func() {
-		logger.Info("listening", "addr", *addr, "mode", "demo")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("server_failed", "err", err)
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	logger.Info("shutting_down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown_failed", "err", err)
+	ln, err := listenLoopback(*addr)
+	if err != nil {
+		logger.Error("listen_failed", "addr", *addr, "err", err)
 		return 1
 	}
-	return 0
+	logger.Info("listening", "addr", ln.Addr().String(), "mode", "demo")
+	return serveUntilSignal(srv, ln, logger)
 }
 
 // seedDemo adds the demo bookmarks and assigns a deterministic pseudo-random

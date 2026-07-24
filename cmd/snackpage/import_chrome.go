@@ -43,9 +43,11 @@ func runImportChrome(args []string) int {
 	fs := flag.NewFlagSet("import chrome", flag.ExitOnError)
 	profile := fs.String("profile", "Default", "Chrome profile name")
 	path := fs.String("path", "", "explicit path to a Chrome Bookmarks file (overrides --profile)")
+	addr := fs.String("addr", "127.0.0.1:8765", "snackpage daemon address")
 	dataDir := fs.String("data-dir", "", "snackpage data dir (overrides XDG)")
 	folder := fs.String("folder", "", "limit import to this folder path (e.g., \"Bookmarks bar/Dev\")")
 	dryRun := fs.Bool("dry-run", false, "parse and report without writing")
+	offline := fs.Bool("offline", false, "write directly with an exclusive lock instead of contacting the daemon")
 	_ = fs.Parse(args)
 
 	// Resolve bookmarks file path
@@ -112,61 +114,147 @@ func runImportChrome(args []string) int {
 		return 1
 	}
 
-	fmt.Fprintf(os.Stdout, "Parsed %d bookmarks from %s\n", len(candidates), bookmarksPath)
+	if _, err := fmt.Fprintf(os.Stdout, "Parsed %d bookmarks from %s\n", len(candidates), bookmarksPath); err != nil {
+		fmt.Fprintln(os.Stderr, "snackpage import chrome: write output:", err)
+		return 1
+	}
 
-	// Open store and dedupe
-	dir := *dataDir
-	if dir == "" {
-		dir, err = xdg.DataDir("snackpage")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "snackpage import chrome:", err)
+	toImport, invalid := prepareChromeBookmarks(candidates)
+	if invalid > 0 {
+		fmt.Fprintf(os.Stderr, "Ignored %d Chrome entries with an empty title or invalid URL\n", invalid)
+	}
+
+	if *dryRun {
+		existing, loadErr := loadBookmarksForDryRun(*addr, *dataDir, *offline)
+		if loadErr != nil {
+			fmt.Fprintln(os.Stderr, "snackpage import chrome:", loadErr)
 			return 1
 		}
+		wouldCreate, skipped := previewBatch(toImport, existing)
+		if _, err := fmt.Fprintf(os.Stdout,
+			"Would import %d new bookmarks (%d existing or duplicate URLs skipped)\n",
+			wouldCreate, skipped); err != nil {
+			fmt.Fprintln(os.Stderr, "snackpage import chrome: write output:", err)
+			return 1
+		}
+		return 0
+	}
+
+	if !*offline {
+		result, postErr := postBookmarkBatch(*addr, toImport, true)
+		if postErr == nil {
+			if _, err := fmt.Fprintf(os.Stdout,
+				"Imported %d new bookmarks (%d existing or duplicate URLs skipped)\n",
+				len(result.Created), result.SkippedExisting); err != nil {
+				fmt.Fprintln(os.Stderr, "snackpage import chrome: write output:", err)
+				return 1
+			}
+			return 0
+		}
+		if !isConnectionRefused(postErr) {
+			fmt.Fprintf(os.Stderr, "snackpage import chrome: daemon request failed; not retrying directly: %v\n", postErr)
+			return 1
+		}
+	}
+
+	dir, err := resolveDataDir(*dataDir)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "snackpage import chrome:", err)
+		return 1
 	}
 	st, err := store.New(dir)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "snackpage import chrome:", err)
 		return 1
 	}
-	existing := map[string]bool{}
-	bms, _ := st.List()
-	for _, b := range bms {
-		existing[b.URL] = true
-	}
-
-	toImport := make([]chromeCandidate, 0, len(candidates))
-	skipped := 0
-	for _, c := range candidates {
-		if c.URL == "" || c.Title == "" {
-			continue // Chrome occasionally has weird entries
+	defer func() {
+		if err := st.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "snackpage import chrome: close store:", err)
 		}
-		if existing[c.URL] {
+	}()
+	created, skipped, err := st.AddBatch(toImport, true)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "snackpage import chrome:", err)
+		return 1
+	}
+	if _, err := fmt.Fprintf(os.Stdout,
+		"Imported %d new bookmarks (%d existing or duplicate URLs skipped)%s\n",
+		len(created), skipped, offlineImportSuffix(*offline, *addr)); err != nil {
+		fmt.Fprintln(os.Stderr, "snackpage import chrome: write output:", err)
+		return 1
+	}
+	return 0
+}
+
+func prepareChromeBookmarks(candidates []chromeCandidate) ([]store.Bookmark, int) {
+	bookmarks := make([]store.Bookmark, 0, len(candidates))
+	invalid := 0
+	for _, candidate := range candidates {
+		title := strings.TrimSpace(candidate.Title)
+		normalizedURL, _, err := normalizeBookmarkURL(candidate.URL)
+		if title == "" || err != nil {
+			invalid++
+			continue
+		}
+		var tags []string
+		if tag := strings.ToLower(strings.TrimSpace(candidate.Parent)); tag != "" {
+			tags = []string{tag}
+		}
+		bookmarks = append(bookmarks, store.Bookmark{
+			Title: title,
+			URL:   normalizedURL,
+			Tags:  tags,
+		})
+	}
+	return bookmarks, invalid
+}
+
+func loadBookmarksForDryRun(addr, dataDir string, offline bool) ([]store.Bookmark, error) {
+	if !offline {
+		bookmarks, err := getBookmarks(addr)
+		if err == nil {
+			return bookmarks, nil
+		}
+		if !isConnectionRefused(err) {
+			return nil, fmt.Errorf("cannot read daemon bookmarks: %w", err)
+		}
+	}
+	dir, err := resolveDataDir(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	bookmarks, _, err := store.LoadSnapshot(dir)
+	return bookmarks, err
+}
+
+func resolveDataDir(override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	return xdg.DataDir("snackpage")
+}
+
+func previewBatch(candidates, existing []store.Bookmark) (created, skipped int) {
+	seen := make(map[string]struct{}, len(existing)+len(candidates))
+	for _, bm := range existing {
+		seen[bm.URL] = struct{}{}
+	}
+	for _, bm := range candidates {
+		if _, duplicate := seen[bm.URL]; duplicate {
 			skipped++
 			continue
 		}
-		toImport = append(toImport, c)
+		seen[bm.URL] = struct{}{}
+		created++
 	}
+	return created, skipped
+}
 
-	if *dryRun {
-		fmt.Fprintf(os.Stdout, "Would import %d new bookmarks (%d already exist)\n", len(toImport), skipped)
-		return 0
+func offlineImportSuffix(explicit bool, addr string) string {
+	if explicit {
+		return " (offline write)"
 	}
-
-	imported := 0
-	for _, c := range toImport {
-		_, err := st.Add(store.Bookmark{
-			Title: c.Title,
-			URL:   c.URL,
-			Tags:  []string{strings.ToLower(c.Parent)},
-		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "snackpage import chrome: skipping %q (%s): %v\n", c.Title, c.URL, err)
-			continue
-		}
-		imported++
-	}
-	fmt.Fprintf(os.Stdout, "Imported %d new bookmarks (%d already existed, skipped)\n", imported, skipped)
-	return 0
+	return fmt.Sprintf(" (direct write — connection refused at %s)", addr)
 }
 
 // chromeBookmarksPath returns the OS-specific Chrome Bookmarks file path

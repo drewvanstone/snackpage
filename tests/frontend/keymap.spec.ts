@@ -54,10 +54,11 @@ test.describe("snackpage picker — keymap and modes", () => {
   test("footer hints change with mode", async ({ page }) => {
     const hints = page.locator("#hints");
 
-    // Insert mode: should mention "⎋ normal" and the `?` help affordance
+    // Insert mode only advertises shortcuts that work while typing. `?` is a
+    // normal-mode command, so it must not be shown here.
     const insertText = (await hints.textContent()) ?? "";
     expect(insertText).toContain("⎋ normal");
-    expect(insertText).toContain("?");
+    expect(insertText).not.toContain("?");
     expect(insertText).not.toContain("j/k");
 
     await page.keyboard.press("Escape");
@@ -138,6 +139,55 @@ test.describe("snackpage picker — keymap and modes", () => {
       .locator('#list li[aria-selected="true"]')
       .getAttribute("data-id");
     expect(normalDown).not.toBe(normalStart);
+  });
+
+  test("query changes reset selection to the top match", async ({ page }) => {
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 2,
+    );
+    await page.keyboard.press("ArrowDown");
+    const movedId = await page
+      .locator('#list li[aria-selected="true"]')
+      .getAttribute("data-id");
+
+    await page.locator("#q").fill("");
+    await page.locator("#q").fill("e");
+    const firstId = await page.locator("#list li").first().getAttribute("data-id");
+    const selectedId = await page
+      .locator('#list li[aria-selected="true"]')
+      .getAttribute("data-id");
+    expect(selectedId).toBe(firstId);
+    expect(selectedId).not.toBe(movedId);
+  });
+
+  test("background refresh preserves selection by bookmark id", async ({ page }) => {
+    await page.locator("#q").fill("e");
+    await page.waitForFunction(
+      () => document.querySelectorAll("#list li").length > 2,
+    );
+    await page.keyboard.press("ArrowDown");
+    const selectedId = await page
+      .locator('#list li[aria-selected="true"]')
+      .getAttribute("data-id");
+
+    await page.waitForTimeout(1050);
+    const response = page.waitForResponse(
+      (candidate) =>
+        candidate.url().endsWith("/api/bookmarks") &&
+        candidate.request().method() === "GET",
+    );
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await response;
+    await expect(
+      page.locator('#list li[aria-selected="true"]'),
+    ).toHaveAttribute("data-id", selectedId!);
+  });
+
+  test("Enter on the manage link uses native link navigation", async ({ page }) => {
+    await page.locator(".cross-link").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForURL("**/manage");
   });
 
   test("Ctrl+N / Ctrl+P navigate in both modes", async ({ page }) => {
@@ -548,6 +598,9 @@ test.describe("snackpage picker — keymap and modes", () => {
     const tag = "undo-add-" + Date.now();
 
     await page.goto("/");
+    await page.waitForFunction(
+      () => document.getElementById("count")?.textContent !== "",
+    );
     await page.locator("#q").focus();
     await page.keyboard.press("Escape");
     await page.keyboard.press("a");
@@ -575,6 +628,157 @@ test.describe("snackpage picker — keymap and modes", () => {
       const j = await r.json();
       return !(j.bookmarks || []).some((b) => (b.tags || []).includes(t));
     }, tag);
+  });
+
+  test("a failed undo stays on the stack and can be retried", async ({
+    page,
+    request,
+  }) => {
+    const tag = "undo-retry-" + Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: "Undo Retry",
+        url: `https://example.com/${tag}`,
+        tags: [tag],
+      },
+    });
+    const created = await create.json();
+
+    await page.goto("/");
+    await page.waitForFunction(
+      () => document.getElementById("count")?.textContent !== "",
+    );
+    await page.locator("#q").fill(tag);
+    await expect(page.locator("#list li")).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(page.locator("#list li")).toHaveCount(0);
+
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "retry me" }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.keyboard.press("u");
+    await expect(page.locator("#status")).toContainText("retry me");
+
+    await page.unroute("**/api/bookmarks");
+    const retry = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/bookmarks") &&
+        response.request().method() === "POST",
+    );
+    await page.keyboard.press("u");
+    await retry;
+    await expect(page.locator("#list li")).toHaveCount(1);
+
+    const list = await (await request.get("/api/bookmarks")).json();
+    const restored = list.bookmarks.find((bookmark) =>
+      (bookmark.tags || []).includes(tag),
+    );
+    expect(restored.id).not.toBe(created.id);
+    await request.delete(`/api/bookmarks/${restored.id}`);
+  });
+
+  test("rapid undo keys run only one inverse mutation", async ({
+    page,
+    request,
+  }) => {
+    const tag = "undo-single-flight-" + Date.now();
+    const create = await request.post("/api/bookmarks", {
+      data: {
+        title: "Undo Single Flight",
+        url: `https://example.com/${tag}`,
+        tags: [tag],
+      },
+    });
+
+    await page.goto("/");
+    await page.waitForFunction(
+      () => document.getElementById("count")?.textContent !== "",
+    );
+    await page.locator("#q").fill(tag);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(page.locator("#list li")).toHaveCount(0);
+
+    let posts = 0;
+    await page.route("**/api/bookmarks", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      posts += 1;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const response = await route.fetch();
+      await route.fulfill({ response });
+    });
+    await page.keyboard.press("u");
+    await page.keyboard.press("u");
+    await expect(page.locator("#list li")).toHaveCount(1);
+    expect(posts).toBe(1);
+
+    const body = await (await request.get("/api/bookmarks")).json();
+    const restored = body.bookmarks.find((bookmark) =>
+      (bookmark.tags || []).includes(tag),
+    );
+    await page.unroute("**/api/bookmarks");
+    await request.delete(`/api/bookmarks/${restored.id}`);
+    const original = await create.json();
+    expect(restored.id).not.toBe(original.id);
+  });
+
+  test("delete restore rekeys earlier edit and add undo entries", async ({
+    page,
+  }) => {
+    const suffix = Date.now();
+    const tag = `undo-compose-${suffix}`;
+    const originalTitle = `Compose Original ${suffix}`;
+    const editedTitle = `Compose Edited ${suffix}`;
+
+    await page.goto("/");
+    await page.waitForFunction(
+      () => document.getElementById("count")?.textContent !== "",
+    );
+    await page.locator("#q").focus();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("a");
+    await page.locator("#m-url").fill(`https://example.com/${tag}`);
+    await page.locator("#m-title").fill(originalTitle);
+    await page.locator("#m-tags").fill(tag);
+    await page.keyboard.press("Enter");
+
+    await page.locator("#q").fill(tag);
+    await expect(page.locator("#list li")).toHaveCount(1);
+    const originalId = await page.locator("#list li").getAttribute("data-id");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("e");
+    await page.locator("#m-title").fill(editedTitle);
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#list .title")).toHaveText(editedTitle);
+
+    await page.keyboard.press("d");
+    await page.keyboard.press("d");
+    await expect(page.locator("#list li")).toHaveCount(0);
+
+    await page.keyboard.press("u");
+    await expect(page.locator("#list li")).toHaveCount(1);
+    const restoredId = await page.locator("#list li").getAttribute("data-id");
+    expect(restoredId).not.toBe(originalId);
+
+    await page.keyboard.press("u");
+    await expect(page.locator("#list .title")).toHaveText(originalTitle);
+
+    await page.keyboard.press("u");
+    await expect(page.locator("#list li")).toHaveCount(0);
   });
 
   test("<Space>m in normal mode jumps to /manage", async ({ page }) => {

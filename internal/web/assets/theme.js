@@ -1,105 +1,55 @@
 // snackpage frontend — theme switcher.
 //
-// Sister module to the inline <head> bootstrap in index.html / manage.html.
+// Sister module to the synchronous <head> bootstrap in index.html/manage.html.
 // The bootstrap resolves the active theme before paint (URL param >
 // localStorage > default) and appends the theme <link>; this module gives
 // app.js and manage.js a runtime hook to swap themes from <Space>t (now via
 // openThemePicker — a modal overlay with live preview).
 
-// Theme registry. Each entry needs id (matches the CSS file under
-// /static/themes/<id>.css and the data-theme attribute), a display name, and
-// a one-line description for the picker overlay. Adding a theme = add an
-// entry here + drop the CSS file.
-export const THEMES = [
-  {
-    id: "catppuccin-mocha",
-    name: "Catppuccin Mocha",
-    description: "Dark, mauve accents, modern",
-  },
-  {
-    id: "classic-mac",
-    name: "Classic Mac",
-    description: "System-6 monochrome throwback",
-  },
-  { id: "dracula", name: "Dracula", description: "Iconic dark purple" },
-  {
-    id: "gruvbox-dark-medium",
-    name: "Gruvbox Dark Medium",
-    description: "Retro warm earth tones",
-  },
-  { id: "nord", name: "Nord", description: "Arctic blue and teal palette" },
-  { id: "tokyo-night", name: "Tokyo Night", description: "Modern dark blue" },
-  { id: "one-dark", name: "One Dark", description: "Atom's purple-blue classic" },
-  {
-    id: "solarized-dark",
-    name: "Solarized Dark",
-    description: "Ethan Schoonover high-contrast",
-  },
-  {
-    id: "tomorrow-night",
-    name: "Tomorrow Night",
-    description: "Chris Kempson's signature",
-  },
-  { id: "monokai", name: "Monokai", description: "Sublime warm classic" },
-  { id: "rose-pine", name: "Rose Pine", description: "Pastel pink/mauve modern" },
-  {
-    id: "everforest-dark",
-    name: "Everforest Dark",
-    description: "Green earth tones, Vim community favorite",
-  },
-  {
-    id: "kanagawa",
-    name: "Kanagawa",
-    description: "Sumi-e Japanese painting inspired",
-  },
-  {
-    id: "github-dark",
-    name: "GitHub Dark",
-    description: "Familiar GitHub aesthetic",
-  },
-  {
-    id: "catppuccin-latte",
-    name: "Catppuccin Latte",
-    description: "Light sibling of Mocha",
-  },
-  {
-    id: "solarized-light",
-    name: "Solarized Light",
-    description: "Classic light counterpart",
-  },
-  { id: "github-light", name: "GitHub Light", description: "GitHub daytime" },
-  {
-    id: "mono-light",
-    name: "Mono Light",
-    description: "Frosted-glass monochrome, IBM Plex Mono",
-  },
-];
+// theme-registry.js is deliberately classic/synchronous so it can also be
+// consumed by the pre-paint bootstrap without permitting inline scripts.
+export const THEMES = globalThis.SnackpageThemes || Object.freeze([]);
+
+function isKnownTheme(name) {
+  return THEMES.some((theme) => theme.id === name);
+}
+
+function themeHref(name) {
+  const current = document.getElementById("theme-css")?.getAttribute("href") || "";
+  const query = current.includes("?") ? current.slice(current.indexOf("?")) : "";
+  return `/static/themes/${name}.css${query}`;
+}
 
 export function currentTheme() {
-  return (
-    document.documentElement.getAttribute("data-theme") || THEMES[0].id
-  );
+  const current = document.documentElement.getAttribute("data-theme");
+  return isKnownTheme(current) ? current : THEMES[0]?.id;
 }
 
 // Apply theme to the DOM and persist the choice to localStorage. The picker
 // overlay commits via this; the cancel path uses previewTheme() instead so
 // the user's storage isn't touched.
 export function setTheme(name) {
-  if (!THEMES.find((t) => t.id === name)) return;
+  if (!isKnownTheme(name)) return false;
   document.documentElement.setAttribute("data-theme", name);
-  localStorage.setItem("snackpageTheme", name);
   const link = document.getElementById("theme-css");
   if (link) {
-    link.href = "/static/themes/" + name + ".css";
+    link.href = themeHref(name);
   } else {
     // Defensive: the bootstrap appended #theme-css before this module ran,
     // but if it isn't there (custom HTML, test harness, etc.) we recreate it.
     const fresh = document.createElement("link");
     fresh.rel = "stylesheet";
     fresh.id = "theme-css";
-    fresh.href = "/static/themes/" + name + ".css";
+    fresh.href = themeHref(name);
     document.head.appendChild(fresh);
   }
+  try {
+    localStorage.setItem("snackpageTheme", name);
+  } catch {
+    // Storage can throw in privacy-restricted or embedded contexts. The
+    // in-page theme change is still valid and should not be rolled back.
+  }
+  return true;
 }
 
 // Same DOM updates as setTheme but does NOT save to localStorage. Used by
@@ -107,16 +57,18 @@ export function setTheme(name) {
 // committing. Esc → revert via previewTheme(originalTheme) leaves storage
 // untouched.
 export function previewTheme(name) {
-  if (!THEMES.find((t) => t.id === name)) return;
+  if (!isKnownTheme(name)) return false;
   document.documentElement.setAttribute("data-theme", name);
   const link = document.getElementById("theme-css");
-  if (link) link.href = "/static/themes/" + name + ".css";
+  if (link) link.href = themeHref(name);
+  return true;
 }
 
 // Legacy cycle helper — no longer wired to <Space>t (the picker overlay
 // took its place) but kept as a callable API for future tooling/extensions
 // (URL params, e2e harnesses, etc.).
 export function cycleTheme() {
+  if (THEMES.length === 0) return "";
   const cur = currentTheme();
   const idx = THEMES.findIndex((t) => t.id === cur);
   const next = THEMES[(idx + 1) % THEMES.length];
@@ -139,6 +91,8 @@ export function openThemePicker() {
   const modalRoot = document.getElementById("modal-root");
   if (!modalRoot) return;
 
+  if (THEMES.length === 0) return;
+  const returnFocus = document.activeElement;
   const originalTheme = currentTheme();
   let mode = "insert"; // "insert" | "normal"
   let query = "";
@@ -186,14 +140,15 @@ export function openThemePicker() {
 
   function buildShell() {
     modalRoot.innerHTML = `
-      <div class="modal-overlay theme-picker-overlay" role="dialog" aria-label="Theme picker" data-mode="${mode}">
-        <div class="modal theme-picker">
-          <h2><span>Theme</span><span class="esc">⎋⎋ to cancel</span></h2>
+      <div class="modal-overlay theme-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="theme-picker-title" data-mode="${mode}">
+        <div class="modal theme-picker" tabindex="-1">
+          <h2 id="theme-picker-title"><span>Theme</span><span class="esc">⎋⎋ to cancel</span></h2>
           <div class="prompt theme-search">
             <span class="glyph">❯</span>
-            <input id="theme-q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <label class="sr-only" for="theme-q">Filter themes</label>
+            <input id="theme-q" type="text" role="combobox" aria-controls="theme-list" aria-expanded="true" aria-autocomplete="list" autocomplete="off" autocapitalize="off" spellcheck="false">
           </div>
-          <ul class="theme-list" id="theme-list" aria-live="polite"></ul>
+          <ul class="theme-list" id="theme-list" role="listbox" aria-label="Themes"></ul>
           <div class="modal-footer">
             <span id="theme-picker-hint"></span>
           </div>
@@ -206,7 +161,8 @@ export function openThemePicker() {
     const list = document.getElementById("theme-list");
     if (!list) return;
     if (filtered.length === 0) {
-      list.innerHTML = `<li class="theme-item empty">No themes match "${escapeHTML(query)}"</li>`;
+      list.innerHTML = `<li class="theme-item empty" role="presentation">No themes match "${escapeHTML(query)}"</li>`;
+      document.getElementById("theme-q")?.removeAttribute("aria-activedescendant");
       return;
     }
     list.innerHTML = filtered.map((t, i) => {
@@ -216,7 +172,7 @@ export function openThemePicker() {
         ? ' <span class="active-label">(active)</span>'
         : "";
       return `
-        <li class="theme-item" ${isSelected ? 'aria-selected="true"' : ""} data-theme-id="${escapeHTML(t.id)}">
+        <li id="theme-option-${escapeHTML(t.id)}" class="theme-item" role="option" aria-selected="${isSelected}" data-theme-id="${escapeHTML(t.id)}">
           <span class="marker">▌</span>
           <div>
             <div class="theme-name">${escapeHTML(t.name)}${activeLabel}</div>
@@ -226,7 +182,10 @@ export function openThemePicker() {
       `;
     }).join("");
     const sel = list.querySelector('[aria-selected="true"]');
-    if (sel) sel.scrollIntoView({ block: "nearest" });
+    if (sel) {
+      sel.scrollIntoView({ block: "nearest" });
+      document.getElementById("theme-q")?.setAttribute("aria-activedescendant", sel.id);
+    }
   }
 
   function updateHint() {
@@ -252,7 +211,12 @@ export function openThemePicker() {
 
   function close() {
     document.removeEventListener("keydown", onKeydown, true);
+    modalRoot.removeEventListener("input", onInput);
+    modalRoot.removeEventListener("click", onClick);
     modalRoot.innerHTML = "";
+    if (returnFocus instanceof HTMLElement && returnFocus.isConnected) {
+      returnFocus.focus();
+    }
   }
 
   function navDown() {
@@ -269,6 +233,11 @@ export function openThemePicker() {
   }
 
   function onKeydown(e) {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      setMode("insert");
+      return;
+    }
     // Esc cascade: insert → normal, normal → close (revert).
     if (e.key === "Escape") {
       e.preventDefault();
@@ -351,5 +320,13 @@ export function openThemePicker() {
   previewSelected();
   // Focus the input now that the shell is in the DOM. Initial mode is insert.
   const $input = document.getElementById("theme-q");
-  if ($input) $input.focus();
+  if ($input) {
+    $input.addEventListener("focus", () => {
+      if (mode !== "insert") {
+        mode = "insert";
+        updateHint();
+      }
+    });
+    $input.focus();
+  }
 }

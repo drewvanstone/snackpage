@@ -22,9 +22,12 @@ func (s *Server) handleRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bump stats best-effort — never block the redirect on a disk error.
-	if err := s.store.Visit(id, time.Now().UTC()); err != nil {
-		s.logger.Warn("visit_record_failed", "id", id, "err", err)
+	// A HEAD probe must not count as a visit. GET stats remain best-effort so
+	// a volatile state-file failure can never block navigation.
+	if r.Method == http.MethodGet {
+		if err := s.store.Visit(id, time.Now().UTC()); err != nil {
+			s.logger.Warn("visit_record_failed", "id", id, "err", err)
+		}
 	}
 	http.Redirect(w, r, url, http.StatusFound)
 }

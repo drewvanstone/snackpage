@@ -1,11 +1,25 @@
 /* snackpage base styles — structure only.
  *
  * Palette tokens (--base, --mauve, …) come from a theme CSS file under
- * /static/themes/<name>.css, loaded ahead of this file by the inline
+ * /static/themes/<name>.css, loaded ahead of this file by the external
  * bootstrap in index.html / manage.html. The base CSS only references
  * variables; switching theme is a matter of swapping the theme file. */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+[hidden] { display: none !important; }
 
 html, body {
   height: 100%;
@@ -113,6 +127,14 @@ body {
   border-bottom: 1px dotted var(--overlay0);
 }
 .cross-link:hover { color: var(--mauve); border-bottom-color: var(--mauve); }
+
+.status {
+  margin-top: 0.6rem;
+  color: var(--subtext0);
+  font-size: 0.72rem;
+}
+.status.error { color: var(--red); }
+.required { color: var(--red); }
 
 /* Modal */
 .modal-overlay {

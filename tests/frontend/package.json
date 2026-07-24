@@ -1,16 +1,19 @@
 {
-  "name": "frontend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "snackpage-frontend-tests",
+  "private": true,
+  "description": "Browser integration tests for snackpage",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "playwright test --project=chromium --workers=1",
+    "test:smoke": "playwright test --project=firefox-smoke --project=webkit-smoke --workers=1",
+    "test:all": "playwright test --workers=1",
+    "install:browsers": "playwright install chromium firefox webkit"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "commonjs",
+  "engines": {
+    "node": "24.x"
+  },
   "devDependencies": {
-    "@playwright/test": "^1.60.0"
+    "@playwright/test": "1.61.0"
   }
 }

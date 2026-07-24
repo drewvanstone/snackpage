@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -19,13 +21,30 @@ func newTestServer(t *testing.T) *httptest.Server {
 
 func newTestServerWith(t *testing.T, opts server.Options) *httptest.Server {
 	t.Helper()
-	st, err := store.New(t.TempDir())
+	return newTestServerAt(t, t.TempDir(), opts)
+}
+
+func newTestServerAt(t *testing.T, dir string, opts server.Options) *httptest.Server {
+	t.Helper()
+	st, err := store.New(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if err := st.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := server.New(st, logger, opts).Handler()
 	return httptest.NewServer(h)
+}
+
+func closeResponse(t *testing.T, resp *http.Response) {
+	t.Helper()
+	if err := resp.Body.Close(); err != nil {
+		t.Errorf("close response body: %v", err)
+	}
 }
 
 func TestHealthz(t *testing.T) {
@@ -36,7 +55,7 @@ func TestHealthz(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d; want 200", resp.StatusCode)
 	}
@@ -54,7 +73,7 @@ func TestRoot_ServesIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200", resp.StatusCode)
 	}
@@ -76,17 +95,14 @@ func TestStaticAssets(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		closeResponse(t, resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("%s: status = %d; want 200", path, resp.StatusCode)
 		}
 	}
 }
 
-// Default (non-dev) mode must not stamp a Cache-Control header on static
-// assets — browsers fall back to heuristic freshness, but a tagged release
-// gets cache-busted via the ?v=<version> query in handleIndex/handleManage.
-func TestStaticAssets_DefaultNoCacheControl(t *testing.T) {
+func TestStaticAssets_DefaultRevalidates(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()
 
@@ -94,9 +110,9 @@ func TestStaticAssets_DefaultNoCacheControl(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if got := resp.Header.Get("Cache-Control"); got != "" {
-		t.Errorf("Cache-Control = %q; want empty (no-op default)", got)
+	closeResponse(t, resp)
+	if got := resp.Header.Get("Cache-Control"); got != "public, max-age=0, must-revalidate" {
+		t.Errorf("Cache-Control = %q; want revalidation", got)
 	}
 }
 
@@ -111,7 +127,7 @@ func TestStaticAssets_DevModeNoStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		resp.Body.Close()
+		closeResponse(t, resp)
 		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
 			t.Errorf("%s: Cache-Control = %q; want %q", path, got, "no-store")
 		}
@@ -128,16 +144,31 @@ func TestIndex_DevModeNoStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	closeResponse(t, resp)
 	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
 		t.Errorf("Cache-Control = %q; want %q", got, "no-store")
 	}
 }
 
+func TestHTMLAndAPIAreNeverCached(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	for _, path := range []string{"/", "/manage", "/healthz", "/api/bookmarks"} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		closeResponse(t, resp)
+		if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+			t.Errorf("%s: Cache-Control = %q; want no-store", path, got)
+		}
+	}
+}
+
 // When the binary is built with a version stamp, the rendered HTML must
 // append ?v=<version> to the entry-point script so a release invalidates
-// stale browser-cached JS/CSS. ES modules carry that query through to
-// relative imports, so versioning app.js is enough to bust theme.js too.
+// stale browser-cached JS/CSS.
 func TestIndex_VersionStamp(t *testing.T) {
 	ts := newTestServerWith(t, server.Options{Version: "v1.2.3"})
 	defer ts.Close()
@@ -146,7 +177,7 @@ func TestIndex_VersionStamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `/static/app.js?v=v1.2.3`) {
 		t.Errorf("index missing versioned app.js; body:\n%s", body)
@@ -164,7 +195,7 @@ func TestIndex_NoVersionStamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	body, _ := io.ReadAll(resp.Body)
 	if strings.Contains(string(body), `app.js?v=`) {
 		t.Errorf("index has dangling ?v= with no version set; body:\n%s", body)
@@ -182,7 +213,7 @@ func TestManage_VersionStamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), `/static/manage.js?v=v9.9.9`) {
 		t.Errorf("manage missing versioned manage.js; body:\n%s", body)
@@ -192,7 +223,11 @@ func TestManage_VersionStamp(t *testing.T) {
 func TestUnknownRoute(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()
-	resp, _ := http.Get(ts.URL + "/nope")
+	resp, err := http.Get(ts.URL + "/nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d; want 404", resp.StatusCode)
 	}
@@ -206,7 +241,7 @@ func TestGetBookmarks_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d; want 200", resp.StatusCode)
 	}
@@ -222,7 +257,7 @@ func postJSON(t *testing.T, url, body string) (*http.Response, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	data, _ := io.ReadAll(resp.Body)
 	return resp, data
 }
@@ -254,22 +289,153 @@ func TestPostBookmark_RejectsBadURL(t *testing.T) {
 	}
 }
 
+func TestPostBookmark_StrictJSONContract(t *testing.T) {
+	tests := []struct {
+		name        string
+		contentType string
+		body        string
+		wantStatus  int
+	}{
+		{
+			name:       "missing content type",
+			body:       `{"title":"x","url":"https://example.com"}`,
+			wantStatus: http.StatusUnsupportedMediaType,
+		},
+		{
+			name:        "unknown field",
+			contentType: "application/json",
+			body:        `{"title":"x","url":"https://example.com","surprise":true}`,
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "trailing value",
+			contentType: "application/json",
+			body:        `{"title":"x","url":"https://example.com"} {}`,
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "oversized",
+			contentType: "application/json",
+			body:        `{"title":"` + strings.Repeat("x", (1<<20)+1) + `","url":"https://example.com"}`,
+			wantStatus:  http.StatusRequestEntityTooLarge,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := newTestServer(t)
+			defer ts.Close()
+			req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks", strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeResponse(t, resp)
+			if resp.StatusCode != tc.wantStatus {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status = %d; want %d; body = %s", resp.StatusCode, tc.wantStatus, body)
+			}
+		})
+	}
+}
+
+func TestPostBookmarkBatch_IsAtomicAndDeduplicates(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp, body := postJSON(t, ts.URL+"/api/bookmarks/batch", `{
+		"bookmarks":[
+			{"title":"one","url":"one.example"},
+			{"title":"one again","url":"https://one.example"},
+			{"title":"two","url":"https://two.example"}
+		],
+		"skip_existing_urls":true
+	}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status = %d; body = %s", resp.StatusCode, body)
+	}
+	var result struct {
+		Created         []store.Bookmark `json:"created"`
+		SkippedExisting int              `json:"skipped_existing"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Created) != 2 || result.SkippedExisting != 1 {
+		t.Fatalf("result = %+v; want 2 created and 1 skipped", result)
+	}
+
+	resp, body = postJSON(t, ts.URL+"/api/bookmarks/batch", `{
+		"bookmarks":[
+			{"title":"valid","url":"https://valid.example"},
+			{"title":"","url":"https://invalid.example"}
+		],
+		"skip_existing_urls":true
+	}`)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid batch status = %d; body = %s", resp.StatusCode, body)
+	}
+	listResp, err := http.Get(ts.URL + "/api/bookmarks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResponse(t, listResp)
+	var list struct {
+		Bookmarks []store.Bookmark `json:"bookmarks"`
+	}
+	if err := json.NewDecoder(listResp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Bookmarks) != 2 {
+		t.Fatalf("invalid batch partially committed: %+v", list.Bookmarks)
+	}
+}
+
+func TestExternalBookmarkChangeReturnsConflict(t *testing.T) {
+	dir := t.TempDir()
+	ts := newTestServerAt(t, dir, server.Options{})
+	defer ts.Close()
+
+	path := filepath.Join(dir, "bookmarks.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resp, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"x","url":"https://example.com"}`)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d; want 409; body = %s", resp.StatusCode, body)
+	}
+}
+
 func TestPutBookmark_Updates(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()
-	resp, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"a","url":"https://example.com"}`)
+	_, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"a","url":"https://example.com"}`)
 	var created struct {
 		ID string `json:"id"`
 	}
 	_ = json.Unmarshal(body, &created)
 
-	req, _ := http.NewRequest("PUT", ts.URL+"/api/bookmarks/"+created.ID,
+	req, err := http.NewRequest("PUT", ts.URL+"/api/bookmarks/"+created.ID,
 		strings.NewReader(`{"title":"b","url":"https://example.com/v2"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d", resp.StatusCode)
 	}
@@ -284,8 +450,15 @@ func TestDeleteBookmark(t *testing.T) {
 	}
 	_ = json.Unmarshal(body, &created)
 
-	req, _ := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/"+created.ID, nil)
-	resp, _ := http.DefaultClient.Do(req)
+	req, err := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/"+created.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Errorf("status = %d; want 204", resp.StatusCode)
 	}
@@ -294,8 +467,15 @@ func TestDeleteBookmark(t *testing.T) {
 func TestDeleteBookmark_NotFound(t *testing.T) {
 	ts := newTestServer(t)
 	defer ts.Close()
-	req, _ := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/00000000", nil)
-	resp, _ := http.DefaultClient.Do(req)
+	req, err := http.NewRequest("DELETE", ts.URL+"/api/bookmarks/00000000", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d; want 404", resp.StatusCode)
 	}
@@ -318,12 +498,15 @@ func TestRedirect_BumpsStatsAndRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusFound {
 		t.Errorf("status = %d; want 302", resp.StatusCode)
 	}
 	if loc := resp.Header.Get("Location"); loc != "https://example.com/x" {
 		t.Errorf("Location = %q; want %q", loc, "https://example.com/x")
+	}
+	if got := resp.Header.Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q; want no-store", got)
 	}
 
 	// Verify GET /api/bookmarks now shows visit_count: 1
@@ -331,10 +514,52 @@ func TestRedirect_BumpsStatsAndRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listResp.Body.Close()
+	defer closeResponse(t, listResp)
 	listBody, _ := io.ReadAll(listResp.Body)
 	if !strings.Contains(string(listBody), `"visit_count":1`) {
 		t.Errorf("expected visit_count=1; got %s", listBody)
+	}
+	if !strings.Contains(string(listBody), `"frecency_score":`) {
+		t.Errorf("expected server-computed frecency_score; got %s", listBody)
+	}
+}
+
+func TestRedirect_HEADDoesNotBumpStats(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	_, body := postJSON(t, ts.URL+"/api/bookmarks", `{"title":"X","url":"https://example.com/x"}`)
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	req, err := http.NewRequest(http.MethodHead, ts.URL+"/go/"+created.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeResponse(t, resp)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d; want 302", resp.StatusCode)
+	}
+
+	listResp, err := http.Get(ts.URL + "/api/bookmarks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResponse(t, listResp)
+	listBody, _ := io.ReadAll(listResp.Body)
+	if !strings.Contains(string(listBody), `"visit_count":0`) {
+		t.Errorf("HEAD changed visit stats: %s", listBody)
 	}
 }
 
@@ -344,8 +569,76 @@ func TestRedirect_NotFound(t *testing.T) {
 	client := &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	resp, _ := client.Get(ts.URL + "/go/00000000")
+	resp, err := client.Get(ts.URL + "/go/00000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeResponse(t, resp)
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d; want 404", resp.StatusCode)
+	}
+}
+
+func TestSecurityHeadersAndLocalRequestChecks(t *testing.T) {
+	ts := newTestServer(t)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeResponse(t, resp)
+	csp := resp.Header.Get("Content-Security-Policy")
+	if csp == "" || strings.Contains(csp, "unsafe-inline") {
+		t.Fatalf("unexpected CSP %q", csp)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q", got)
+	}
+
+	badHost, err := http.NewRequest(http.MethodGet, ts.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badHost.Host = "attacker.example"
+	resp, err = http.DefaultClient.Do(badHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeResponse(t, resp)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("bad Host status = %d; want 400", resp.StatusCode)
+	}
+
+	crossOrigin, err := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks",
+		strings.NewReader(`{"title":"x","url":"https://example.com"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossOrigin.Header.Set("Content-Type", "application/json")
+	crossOrigin.Header.Set("Origin", "https://attacker.example")
+	resp, err = http.DefaultClient.Do(crossOrigin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeResponse(t, resp)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("cross-origin status = %d; want 403", resp.StatusCode)
+	}
+
+	wrongScheme, err := http.NewRequest(http.MethodPost, ts.URL+"/api/bookmarks",
+		strings.NewReader(`{"title":"x","url":"https://example.com"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongScheme.Header.Set("Content-Type", "application/json")
+	wrongScheme.Header.Set("Origin", strings.Replace(ts.URL, "http://", "https://", 1))
+	resp, err = http.DefaultClient.Do(wrongScheme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeResponse(t, resp)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("cross-scheme status = %d; want 403", resp.StatusCode)
 	}
 }

@@ -1,24 +1,17 @@
 // Add subcommand: create a bookmark from the CLI.
 //
-// Strategy: try POST to a running daemon first (500ms timeout). If the
-// transport fails (no listener, timeout, DNS, etc.), fall back to a direct
-// store.Add() write. If the daemon answered with a non-2xx (e.g. 400
-// validation), surface that error and exit 1 — do not fall back, since the
-// server already saw and rejected the input.
+// Strategy: POST to a running daemon first. Only a definitive
+// connection-refused error falls back to a locked direct write. A timeout,
+// reset, malformed response, or HTTP error may mean the daemon committed the
+// request, so retrying directly would risk a duplicate.
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/drewvanstone/snackpage/internal/store"
 	"github.com/drewvanstone/snackpage/internal/xdg"
@@ -31,6 +24,7 @@ func runAdd(args []string) int {
 	aliasesCSV := fs.String("aliases", "", "comma-separated aliases")
 	addr := fs.String("addr", "127.0.0.1:8765", "snackpage daemon address")
 	dataDir := fs.String("data-dir", "", "direct-write data dir (overrides XDG)")
+	offline := fs.Bool("offline", false, "write directly with an exclusive lock instead of contacting the daemon")
 	// Reorder so positional args (the URL) can appear anywhere relative to flags.
 	// Stock Go flag parsing stops at the first non-flag token; users typically
 	// type `snackpage add https://example.com --title X`, so accept either order.
@@ -43,11 +37,9 @@ func runAdd(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: snackpage add URL [flags]")
 		return 2
 	}
-	rawURL := rest[0]
-
-	parsed, err := url.Parse(rawURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		fmt.Fprintf(os.Stderr, "snackpage add: %q is not a valid URL (scheme and host required)\n", rawURL)
+	rawURL, parsed, err := normalizeBookmarkURL(rest[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "snackpage add: %v\n", err)
 		return 2
 	}
 
@@ -63,21 +55,18 @@ func runAdd(args []string) int {
 		Aliases: splitCSV(*aliasesCSV),
 	}
 
-	// Try POST first.
-	created, postErr := postBookmark(*addr, bm)
-	if postErr == nil {
-		fmt.Printf("added %s  %s\n", created.ID, created.Title)
-		return 0
-	}
-	// If the daemon answered with a non-2xx, surface and exit. Only fall back
-	// when the daemon could not be reached at all.
-	var serverErr *httpServerError
-	if errors.As(postErr, &serverErr) {
-		fmt.Fprintf(os.Stderr, "snackpage add: server rejected: %s\n", serverErr.body)
-		return 1
+	if !*offline {
+		created, postErr := postBookmark(*addr, bm)
+		if postErr == nil {
+			fmt.Printf("added %s  %s\n", created.ID, created.Title)
+			return 0
+		}
+		if !isConnectionRefused(postErr) {
+			fmt.Fprintf(os.Stderr, "snackpage add: daemon request failed; not retrying directly: %v\n", postErr)
+			return 1
+		}
 	}
 
-	// Fall back to direct write for any transport error (refused, timeout, DNS, etc.).
 	dir := *dataDir
 	if dir == "" {
 		dir, err = xdg.DataDir("snackpage")
@@ -91,64 +80,34 @@ func runAdd(args []string) int {
 		fmt.Fprintln(os.Stderr, "snackpage add:", err)
 		return 1
 	}
-	created, err = st.Add(bm)
+	defer func() {
+		if err := st.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "snackpage add: close store:", err)
+		}
+	}()
+	created, err := st.Add(bm)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "snackpage add:", err)
 		return 1
 	}
-	fmt.Printf("added %s  %s  (direct write — no daemon at %s)\n", created.ID, created.Title, *addr)
+	if *offline {
+		fmt.Printf("added %s  %s  (offline write)\n", created.ID, created.Title)
+	} else {
+		fmt.Printf("added %s  %s  (direct write — connection refused at %s)\n", created.ID, created.Title, *addr)
+	}
 	return 0
 }
 
-// httpServerError marks a non-2xx response from the daemon. It is the only
-// error type from postBookmark that should NOT trigger fallback — the server
-// saw the request and chose to reject it.
-type httpServerError struct {
-	status int
-	body   string
-}
-
-func (e *httpServerError) Error() string {
-	return fmt.Sprintf("server returned %d: %s", e.status, e.body)
-}
-
-// postBookmark POSTs the bookmark to a running daemon.
-//
-// Returns:
-//   - (created, nil) on 2xx
-//   - (_, *httpServerError) on non-2xx (daemon answered but rejected)
-//   - (_, transport error) when the daemon could not be reached
-func postBookmark(addr string, bm store.Bookmark) (store.Bookmark, error) {
-	body, err := json.Marshal(struct {
-		Title   string   `json:"title"`
-		URL     string   `json:"url"`
-		Tags    []string `json:"tags"`
-		Aliases []string `json:"aliases"`
-	}{bm.Title, bm.URL, bm.Tags, bm.Aliases})
-	if err != nil {
-		return store.Bookmark{}, err
+func normalizeBookmarkURL(raw string) (string, *url.URL, error) {
+	normalized := strings.TrimSpace(raw)
+	if !strings.Contains(normalized, "://") {
+		normalized = "https://" + normalized
 	}
-
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Post("http://"+addr+"/api/bookmarks", "application/json", bytes.NewReader(body))
-	if err != nil {
-		// Any transport-level error means "no daemon reachable" — surface to caller for fallback.
-		return store.Bookmark{}, err
+	parsed, err := url.Parse(normalized)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", nil, fmt.Errorf("%q is not a valid URL (scheme and host required)", raw)
 	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode/100 != 2 {
-		return store.Bookmark{}, &httpServerError{
-			status: resp.StatusCode,
-			body:   strings.TrimSpace(string(respBody)),
-		}
-	}
-	var created store.Bookmark
-	if err := json.Unmarshal(respBody, &created); err != nil {
-		return store.Bookmark{}, err
-	}
-	return created, nil
+	return normalized, parsed, nil
 }
 
 // splitFlagsAndPositionals walks args once and partitions tokens into
