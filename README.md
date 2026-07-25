@@ -118,6 +118,15 @@ snackpage's default URL is `http://127.0.0.1:8765`.
 Install a reputable new-tab redirect extension and set its target to the
 snackpage URL. The browser's “On startup” preference does not change new tabs.
 
+Chrome gives a new tab's initial keyboard focus to the address bar, so the
+redirect extension must transfer focus into the loaded page before snackpage
+can focus its search field. If you use **Custom New Tab**, open its extension
+options and clear **Focus on the address bar on the new tab page**. With that
+option cleared, its page navigation hands focus to snackpage and the search
+field's autofocus takes effect. Leaving it selected deliberately keeps typing
+in Chrome's address bar. See Chrome's
+[new-tab override guidance](https://developer.chrome.com/docs/extensions/develop/ui/override-chrome-pages#best-practices).
+
 Chrome's `NewTabPageLocation` is an enterprise-managed policy on macOS; a
 normal `defaults write` command does not install a valid managed policy. If
 your organization manages Chrome, an administrator can deploy the policy and
@@ -154,6 +163,13 @@ must match literally, so unrelated URL components cannot combine into a
 result. Server-computed frecency and alphabetical title provide stable
 tie-breaking. Hovering a result moves the active selection and clicking it
 opens the bookmark; the footer shows the version served by the running binary.
+
+Every non-empty query also ends with a **Search Google for “…”** action.
+Bookmark matches stay first and selected by default. When no bookmark
+qualifies, the Google action is selected automatically; when bookmarks do
+match, pressing `↑` from the first result wraps directly to it. `Enter` searches
+in the current tab and `Cmd+Enter` / `Ctrl+Enter` searches in a new tab. The
+query is sent to Google only when that action is opened, never while typing.
 
 ### Picker keyboard map
 
@@ -369,6 +385,12 @@ The Go server uses `net/http`; `internal/store` owns the locked JSON snapshot;
 and `internal/web` embeds the dependency-free runtime frontend. The HTTP API is
 the mutation boundary while the daemon runs. See [ARCHITECTURE.md](ARCHITECTURE.md)
 for data flow, consistency guarantees, API routes, and extension points.
+
+The current [roadmap](ROADMAP.md) records active explorations and decision
+gates. In particular, the
+[Astryx evaluation](docs/research/2026-07-25-astryx.md) considers an isolated
+richer manage view without committing the picker or current architecture to a
+frontend framework.
 
 The original [v1 design](docs/superpowers/specs/2026-05-23-snackpage-design.md)
 and [implementation plan](docs/superpowers/plans/2026-05-23-snackpage-v1.md)

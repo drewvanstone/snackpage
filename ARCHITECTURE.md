@@ -60,6 +60,8 @@ internal/web/
     ├── manage.html         manage document shell
     ├── app.js              picker state, ranking, commands, dialogs, undo
     ├── manage.js           row editor, serialized saves, commands, undo
+    ├── search.js           shared bookmark relevance admission and scoring
+    ├── web-search.js       web-search provider registry and URL construction
     ├── theme-registry.js   immutable list of the 18 valid themes
     ├── theme-bootstrap.js  validated pre-paint theme resolution
     ├── theme.js            runtime theme picker
@@ -318,6 +320,14 @@ non-empty confidence tier wins: acronym, then quality-filtered fuzzy. The field
 weights rank admitted matches; they cannot rescue weak title or hostname
 matches when a literal result exists.
 
+Every non-empty query appends one transient web-search action after the
+qualified bookmarks. Google is the only configured provider, but URL
+construction lives behind a provider definition so provider choice can become
+configuration without changing result or navigation logic. Bookmark matches
+remain selected first; the web action is selected only when no bookmark
+qualifies or the user moves to it. It is never persisted, included in bookmark
+counts or frecency, or sent over the network until activation.
+
 Server-computed `frecency_score` is a small tie-breaker, followed by title, URL,
 and ID for deterministic order. The browser does not duplicate the frecency
 formula. Picker and manage filtering share these relevance rules. An empty
@@ -470,3 +480,9 @@ Deferred features include service/autostart installers, new import sources,
 live synchronization/conflict merging, custom user themes, a TUI, alternate
 storage engines, and first-party browser extensions. They are not assumptions
 inside the current architecture.
+
+An Astryx-backed manage view is also an exploration, not an accepted dependency
+or migration. Any proof of concept must remain isolated, use embedded
+same-origin assets, and preserve the current mutation and keyboard invariants.
+See the [roadmap](ROADMAP.md) and
+[research note](docs/research/2026-07-25-astryx.md).

@@ -1,8 +1,9 @@
 # Repository instructions for AI assistants
 
 Read `ARCHITECTURE.md` before changing behavior. `README.md` is the
-user-facing contract. Files under `docs/superpowers/` are historical records,
-not executable plans.
+user-facing contract. `ROADMAP.md` records current explorations, not accepted
+architecture or executable plans. Files under `docs/superpowers/` are
+historical records.
 
 ## Product identity
 
@@ -76,6 +77,9 @@ or repository abstraction unless a concrete requirement earns that cost.
   further writes until a full reload; never retry it from the page.
 - Apply normalized server responses instead of assuming the request payload is
   canonical.
+- Keep web-search actions transient and provider-shaped. They must not enter
+  bookmark storage, counts, or frecency, and no query leaves the browser until
+  the user activates the action.
 - Derive mode from actual focus and keep focus restoration/focus traps intact.
 - Failed undo operations remain retryable; restored IDs must rekey dependent
   undo entries.
