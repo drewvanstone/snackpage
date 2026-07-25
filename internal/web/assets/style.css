@@ -104,6 +104,12 @@ body {
 .meta { color: var(--surface2); font-size: 0.78rem; text-align: right; }
 .meta .count { display: block; color: var(--subtext0); font-size: 0.72rem; }
 
+.web-search-row {
+  margin-top: 0.2rem;
+  border-top: 1px solid var(--surface0);
+}
+.web-search-row .title { color: var(--mauve); }
+
 .row.deleting { background: rgba(243, 139, 168, 0.18); }
 .row.deleting .title { color: var(--red); }
 

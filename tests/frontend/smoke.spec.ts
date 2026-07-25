@@ -19,6 +19,17 @@ function searchBookmark(
   };
 }
 
+test("@smoke direct navigation focuses the bookmark search", async ({ page }) => {
+  await page.goto("/");
+
+  const query = page.getByRole("combobox", { name: "Search bookmarks" });
+  await expect(query).toBeFocused();
+  await expect(page.locator("#picker")).toHaveAttribute("data-mode", "insert");
+
+  await page.keyboard.type("github");
+  await expect(query).toHaveValue("github");
+});
+
 test("@smoke picker loads, filters, and exposes accessible selection", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#count")).not.toHaveText("");
@@ -37,7 +48,7 @@ test("@smoke pointer hover selects and click opens a bookmark", async ({ page })
 
   const query = page.getByRole("combobox", { name: "Search bookmarks" });
   await query.fill("e");
-  const options = page.getByRole("option");
+  const options = page.locator("#list li[data-id]");
   await expect(options.nth(1)).toBeVisible();
 
   const hovered = options.nth(1);
@@ -174,11 +185,17 @@ test("@smoke search rejects scattered matches and keeps close fuzzy matches", as
   await page.goto("/");
 
   const query = page.getByRole("combobox", { name: "Search bookmarks" });
-  const options = page.getByRole("option");
-  const titles = page.locator("#list .title");
+  const allOptions = page.getByRole("option");
+  const options = page.locator("#list li[data-id]");
+  const titles = options.locator(".title");
 
   await query.fill("e");
   await expect(options).toHaveCount(bookmarks.length);
+  await expect(allOptions).toHaveCount(bookmarks.length + 1);
+  await expect(allOptions.last()).toHaveAttribute(
+    "id",
+    "web-search-option-google",
+  );
   const oldScrollTop = await page.locator("#list").evaluate((list) => {
     list.scrollTop = list.scrollHeight;
     return list.scrollTop;

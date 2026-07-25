@@ -3,11 +3,16 @@
 
 import { openThemePicker } from "./theme.js";
 import { scoreBookmarkMatches } from "./search.js";
+import {
+  DEFAULT_WEB_SEARCH_PROVIDER_ID,
+  getWebSearchProvider,
+} from "./web-search.js";
 
 const state = {
   bookmarks: [],   // [{id,title,url,tags,aliases,visit_count,last_visit_at,frecency_score}]
   view: [],        // filtered + sorted subset rendered to DOM
   selectedId: null,
+  selectedSearchProviderId: null,
   mode: "insert",  // "insert" | "normal" — vim-style modal editor mode
   mutationBlocked: false,
   mutationInFlight: false,
@@ -28,6 +33,32 @@ const $hints = document.getElementById("hints");
 const $status = document.getElementById("status");
 let lastLoadedAt = 0;
 let loadGeneration = 0;
+
+function currentWebSearch() {
+  const query = $q.value.trim();
+  if (query === "") return null;
+  const provider = getWebSearchProvider(DEFAULT_WEB_SEARCH_PROVIDER_ID);
+  return provider ? { provider, query } : null;
+}
+
+function resultCount() {
+  return state.view.length + (currentWebSearch() ? 1 : 0);
+}
+
+function selectBookmarkId(id) {
+  state.selectedId = id;
+  state.selectedSearchProviderId = null;
+}
+
+function selectWebSearch(providerId) {
+  state.selectedId = null;
+  state.selectedSearchProviderId = providerId;
+}
+
+function clearSelection() {
+  state.selectedId = null;
+  state.selectedSearchProviderId = null;
+}
 
 // Footer hints text per mode. The visible affordance should match what the
 // keyboard actually does: in insert you press ⎋ to leave to normal; in
@@ -100,6 +131,9 @@ function requireBookmark(body) {
 async function load({ preserveSelection = true } = {}) {
   const generation = ++loadGeneration;
   const previousId = preserveSelection ? state.selectedId : null;
+  const previousSearchProviderId = preserveSelection
+    ? state.selectedSearchProviderId
+    : null;
   try {
     const json = await apiFetch("/api/bookmarks");
     if (generation !== loadGeneration) return;
@@ -108,6 +142,7 @@ async function load({ preserveSelection = true } = {}) {
     }
     state.bookmarks = json.bookmarks;
     state.selectedId = previousId;
+    state.selectedSearchProviderId = previousSearchProviderId;
     refresh({ resetSelection: !preserveSelection });
     lastLoadedAt = Date.now();
     if (state.mutationBlocked) {
@@ -131,12 +166,26 @@ function refresh({ resetSelection = false } = {}) {
   } else {
     state.view = fuzzyRank(q, state.bookmarks);
   }
+  const webSearch = currentWebSearch();
+  const selectedBookmarkVisible = Boolean(
+    state.selectedId &&
+    state.view.some((bookmark) => bookmark.id === state.selectedId)
+  );
+  const selectedSearchAvailable = Boolean(
+    webSearch &&
+    state.selectedSearchProviderId === webSearch.provider.id
+  );
   if (
     resetSelection ||
-    !state.selectedId ||
-    !state.view.some((bookmark) => bookmark.id === state.selectedId)
+    (!selectedBookmarkVisible && !selectedSearchAvailable)
   ) {
-    state.selectedId = state.view[0]?.id || null;
+    if (state.view.length > 0) {
+      selectBookmarkId(state.view[0].id);
+    } else if (webSearch) {
+      selectWebSearch(webSearch.provider.id);
+    } else {
+      clearSelection();
+    }
   }
   render();
 }
@@ -199,14 +248,17 @@ function displayHost(url) {
 
 function render() {
   $list.innerHTML = "";
-  state.view.forEach((b, i) => {
+  state.view.forEach((b) => {
     const li = document.createElement("li");
     li.className = "row";
-    const selected = b.id === state.selectedId;
+    const selected =
+      state.selectedSearchProviderId === null &&
+      b.id === state.selectedId;
     li.id = `bookmark-option-${b.id}`;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", selected ? "true" : "false");
     li.dataset.id = b.id;
+    li.dataset.resultKind = "bookmark";
     // Tags are wrapped in <span class="tag"> so themes can restyle them
     // (e.g. classic-mac renders bordered chiclets). The "·" separator stays
     // outside the spans so it's not styled with them.
@@ -223,10 +275,45 @@ function render() {
     `;
     $list.appendChild(li);
   });
+
+  const webSearch = currentWebSearch();
+  if (webSearch) {
+    const { provider, query } = webSearch;
+    const label = `Search ${provider.name} for “${query}”`;
+    const li = document.createElement("li");
+    li.className = "row web-search-row";
+    li.id = `web-search-option-${provider.id}`;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-label", label);
+    li.setAttribute(
+      "aria-selected",
+      state.selectedSearchProviderId === provider.id ? "true" : "false",
+    );
+    li.dataset.resultKind = "web-search";
+    li.dataset.searchProvider = provider.id;
+    li.innerHTML = `
+      <span class="marker">▌</span>
+      <div>
+        <div class="title">${escapeHTML(label)}</div>
+        <div class="sub">${escapeHTML(provider.displayHost)}  ·  web search</div>
+      </div>
+      <div class="meta">web</div>
+    `;
+    $list.appendChild(li);
+  }
+
   $count.textContent = `${state.view.length} / ${state.bookmarks.length}`;
-  $q.setAttribute("aria-expanded", String(state.view.length > 0));
+  $q.setAttribute("aria-expanded", String(resultCount() > 0));
   if (state.selectedId) {
-    $q.setAttribute("aria-activedescendant", `bookmark-option-${state.selectedId}`);
+    $q.setAttribute(
+      "aria-activedescendant",
+      `bookmark-option-${state.selectedId}`,
+    );
+  } else if (webSearch && state.selectedSearchProviderId === webSearch.provider.id) {
+    $q.setAttribute(
+      "aria-activedescendant",
+      `web-search-option-${webSearch.provider.id}`,
+    );
   } else {
     $q.removeAttribute("aria-activedescendant");
   }
@@ -240,21 +327,52 @@ $q.addEventListener("input", () => {
 });
 
 function selectedIndex() {
-  return state.view.findIndex((bookmark) => bookmark.id === state.selectedId);
+  const bookmarkIndex = state.view.findIndex(
+    (bookmark) => bookmark.id === state.selectedId,
+  );
+  if (bookmarkIndex >= 0) return bookmarkIndex;
+  const webSearch = currentWebSearch();
+  if (
+    webSearch &&
+    state.selectedSearchProviderId === webSearch.provider.id
+  ) {
+    return state.view.length;
+  }
+  return -1;
 }
 
 function selectedBookmark() {
   return state.view.find((bookmark) => bookmark.id === state.selectedId);
 }
 
+function selectedWebSearch() {
+  const webSearch = currentWebSearch();
+  if (
+    webSearch &&
+    state.selectedSearchProviderId === webSearch.provider.id
+  ) {
+    return webSearch;
+  }
+  return null;
+}
+
 function selectRenderedRow(li) {
   const id = li.dataset.id;
-  if (!id) return false;
-  state.selectedId = id;
+  const searchProviderId = li.dataset.searchProvider;
+  if (id) {
+    selectBookmarkId(id);
+  } else if (
+    li.dataset.resultKind === "web-search" &&
+    searchProviderId
+  ) {
+    selectWebSearch(searchProviderId);
+  } else {
+    return false;
+  }
   for (const row of $list.querySelectorAll(".row")) {
     row.setAttribute("aria-selected", row === li ? "true" : "false");
   }
-  $q.setAttribute("aria-activedescendant", `bookmark-option-${id}`);
+  $q.setAttribute("aria-activedescendant", li.id);
   return true;
 }
 
@@ -279,12 +397,18 @@ async function runMutation(task) {
 }
 
 function selectIndex(index) {
-  if (state.view.length === 0) {
-    state.selectedId = null;
+  const count = resultCount();
+  if (count === 0) {
+    clearSelection();
     return;
   }
-  const clamped = Math.max(0, Math.min(state.view.length - 1, index));
-  state.selectedId = state.view[clamped].id;
+  const clamped = Math.max(0, Math.min(count - 1, index));
+  if (clamped < state.view.length) {
+    selectBookmarkId(state.view[clamped].id);
+    return;
+  }
+  const webSearch = currentWebSearch();
+  if (webSearch) selectWebSearch(webSearch.provider.id);
 }
 
 function scrollSelectedIntoView() {
@@ -293,9 +417,10 @@ function scrollSelectedIntoView() {
 }
 
 function move(delta) {
-  if (state.view.length === 0) return;
+  const count = resultCount();
+  if (count === 0) return;
   const current = Math.max(0, selectedIndex());
-  selectIndex((current + delta + state.view.length) % state.view.length);
+  selectIndex((current + delta + count) % count);
   render();
   scrollSelectedIntoView();
 }
@@ -303,7 +428,8 @@ function move(delta) {
 // Half-page scroll, vim's Ctrl+D / Ctrl+U. Move selection by half the
 // currently visible row count, clamped at the list edges (no wrap).
 function pageScroll(direction) {
-  if (state.view.length === 0) return;
+  const count = resultCount();
+  if (count === 0) return;
   const firstRow = $list.querySelector("li");
   if (!firstRow) return;
   const rowH = firstRow.offsetHeight || 1;
@@ -311,7 +437,7 @@ function pageScroll(direction) {
   const current = Math.max(0, selectedIndex());
   selectIndex(Math.max(
     0,
-    Math.min(state.view.length - 1, current + direction * halfVisible),
+    Math.min(count - 1, current + direction * halfVisible),
   ));
   render();
   scrollSelectedIntoView();
@@ -319,8 +445,11 @@ function pageScroll(direction) {
 
 function openSelected(newTab) {
   const b = selectedBookmark();
-  if (!b) return;
-  const url = "/go/" + encodeURIComponent(b.id);
+  const webSearch = selectedWebSearch();
+  if (!b && !webSearch) return;
+  const url = b
+    ? "/go/" + encodeURIComponent(b.id)
+    : webSearch.provider.buildURL(webSearch.query);
   if (newTab) window.open(url, "_blank", "noopener");
   else window.location.href = url;
 }
@@ -346,10 +475,10 @@ const ACTIONS = {
   "nav-down":      () => move(1),
   "nav-up":        () => move(-1),
   "nav-top":       () => {
-    if (state.view.length) { selectIndex(0); render(); scrollSelectedIntoView(); }
+    if (resultCount()) { selectIndex(0); render(); scrollSelectedIntoView(); }
   },
   "nav-bottom":    () => {
-    if (state.view.length) { selectIndex(state.view.length - 1); render(); scrollSelectedIntoView(); }
+    if (resultCount()) { selectIndex(resultCount() - 1); render(); scrollSelectedIntoView(); }
   },
   "open":          () => openSelected(false),
   "open-new-tab":  () => openSelected(true),
@@ -830,7 +959,7 @@ async function createBookmark(payload) {
     body: JSON.stringify(payload),
   }));
   state.undoStack.push({ kind: "add", id: created.id });
-  state.selectedId = created.id;
+  selectBookmarkId(created.id);
   await load();
 }
 
@@ -852,7 +981,7 @@ async function updateBookmark(id, payload) {
     body: JSON.stringify(payload),
   }));
   if (prev) state.undoStack.push({ kind: "edit", id, prev });
-  state.selectedId = id;
+  selectBookmarkId(id);
   await load();
 }
 
@@ -878,7 +1007,7 @@ function rekeyUndoReferences(oldId, newId) {
   for (const item of state.undoStack) {
     if (item.id === oldId) item.id = newId;
   }
-  if (state.selectedId === oldId) state.selectedId = newId;
+  if (state.selectedId === oldId) selectBookmarkId(newId);
 }
 
 async function undo() {
@@ -893,14 +1022,14 @@ async function undo() {
         body: JSON.stringify(entry.prev),
       }));
       rekeyUndoReferences(entry.id, restored.id);
-      state.selectedId = restored.id;
+      selectBookmarkId(restored.id);
     } else if (entry.kind === "edit") {
       requireBookmark(await apiFetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(entry.prev),
       }));
-      state.selectedId = entry.id;
+      selectBookmarkId(entry.id);
     } else if (entry.kind === "add") {
       await apiFetch("/api/bookmarks/" + encodeURIComponent(entry.id), {
         method: "DELETE",

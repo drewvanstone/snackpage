@@ -40,11 +40,11 @@ test.describe("snackpage picker — modal flows", () => {
   });
 
   test("Esc inside modal cancels (no list change)", async ({ page }) => {
-    const beforeCount = await page.locator("#list li").count();
+    const beforeCount = await page.locator("#list li[data-id]").count();
     await openAddModal(page);
     await page.keyboard.press("Escape");
     await expect(page.locator(".modal-overlay")).toHaveCount(0);
-    const afterCount = await page.locator("#list li").count();
+    const afterCount = await page.locator("#list li[data-id]").count();
     expect(afterCount).toBe(beforeCount);
   });
 
@@ -252,10 +252,10 @@ test.describe("snackpage picker — modal flows", () => {
     // Reveal at least one row.
     await page.locator("#q").fill("github");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
+      () => document.querySelectorAll("#list li[data-id]").length > 0
     );
     const expectedTitle = await page
-      .locator('#list li[aria-selected="true"] .title')
+      .locator('#list li[data-id][aria-selected="true"] .title')
       .textContent();
     expect(expectedTitle).toBeTruthy();
 
@@ -287,9 +287,11 @@ test.describe("snackpage picker — modal flows", () => {
     try {
       await page.goto("/");
       await page.locator("#q").fill(title);
-      const selected = page.locator('#list li[aria-selected="true"]');
+      const selected = page.locator(
+        '#list li[data-id][aria-selected="true"]',
+      );
       await expect(selected).toHaveAttribute("data-id", owned.id);
-      const beforeCount = await page.locator("#list li").count();
+      const beforeCount = await page.locator("#list li[data-id]").count();
 
       // Drop into normal mode and fire `d` `d` as a chord.
       await page.keyboard.press("Escape");
@@ -309,7 +311,9 @@ test.describe("snackpage picker — modal flows", () => {
       expect(deleteResponse.status()).toBe(204);
 
       await expect(page.locator(`#list li[data-id="${owned.id}"]`)).toHaveCount(0);
-      await expect(page.locator("#list li")).toHaveCount(beforeCount - 1);
+      await expect(page.locator("#list li[data-id]")).toHaveCount(
+        beforeCount - 1,
+      );
     } finally {
       await request.delete(`/api/bookmarks/${owned.id}`);
     }

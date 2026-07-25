@@ -83,7 +83,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     // j/k has somewhere to navigate. Then drop into normal mode.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 1
+      () => document.querySelectorAll("#list li[data-id]").length > 1
     );
     await page.keyboard.press("Escape");
     await expect(page.locator("#picker")).toHaveAttribute(
@@ -92,17 +92,17 @@ test.describe("snackpage picker — keymap and modes", () => {
     );
 
     const beforeJ = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     await page.keyboard.press("j");
     const afterJ = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterJ).not.toBe(beforeJ);
 
     await page.keyboard.press("k");
     const afterK = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterK).toBe(beforeJ);
   });
@@ -111,32 +111,32 @@ test.describe("snackpage picker — keymap and modes", () => {
     // Prime the list with a multi-row result first.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 1
+      () => document.querySelectorAll("#list li[data-id]").length > 1
     );
 
     // Insert mode
     const insertStart = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     await page.keyboard.press("ArrowDown");
     const afterDown = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterDown).not.toBe(insertStart);
     await page.keyboard.press("ArrowUp");
     const afterUp = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterUp).toBe(insertStart);
 
     // Normal mode
     await page.keyboard.press("Escape");
     const normalStart = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     await page.keyboard.press("ArrowDown");
     const normalDown = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(normalDown).not.toBe(normalStart);
   });
@@ -144,18 +144,21 @@ test.describe("snackpage picker — keymap and modes", () => {
   test("query changes reset selection to the top match", async ({ page }) => {
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 2,
+      () => document.querySelectorAll("#list li[data-id]").length > 2,
     );
     await page.keyboard.press("ArrowDown");
     const movedId = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
 
     await page.locator("#q").fill("");
     await page.locator("#q").fill("e");
-    const firstId = await page.locator("#list li").first().getAttribute("data-id");
+    const firstId = await page
+      .locator("#list li[data-id]")
+      .first()
+      .getAttribute("data-id");
     const selectedId = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(selectedId).toBe(firstId);
     expect(selectedId).not.toBe(movedId);
@@ -164,11 +167,11 @@ test.describe("snackpage picker — keymap and modes", () => {
   test("background refresh preserves selection by bookmark id", async ({ page }) => {
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 2,
+      () => document.querySelectorAll("#list li[data-id]").length > 2,
     );
     await page.keyboard.press("ArrowDown");
     const selectedId = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
 
     await page.waitForTimeout(1050);
@@ -180,7 +183,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await response;
     await expect(
-      page.locator('#list li[aria-selected="true"]'),
+      page.locator('#list li[data-id][aria-selected="true"]'),
     ).toHaveAttribute("data-id", selectedId!);
   });
 
@@ -194,20 +197,20 @@ test.describe("snackpage picker — keymap and modes", () => {
     // Prime the list with a multi-row result first.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 1
+      () => document.querySelectorAll("#list li[data-id]").length > 1
     );
 
     const start = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     await page.keyboard.press("Control+n");
     const afterN = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterN).not.toBe(start);
     await page.keyboard.press("Control+p");
     const afterP = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterP).toBe(start);
 
@@ -215,7 +218,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.keyboard.press("Escape");
     await page.keyboard.press("Control+n");
     const normalAfterN = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(normalAfterN).not.toBe(start);
   });
@@ -244,7 +247,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     // Prime list with a multi-row result that exceeds the visible area.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 20
+      () => document.querySelectorAll("#list li[data-id]").length > 20
     );
 
     // Compute expected half-page step from DOM measurements (matches the
@@ -302,7 +305,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     // Prime the list with a multi-row result.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 2
+      () => document.querySelectorAll("#list li[data-id]").length > 2
     );
     await page.keyboard.press("Escape");
     await expect(page.locator("#picker")).toHaveAttribute(
@@ -344,7 +347,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     // max-height (60vh) so a real scroll is required to see the bottom row.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 20
+      () => document.querySelectorAll("#list li[data-id]").length > 20
     );
     await page.keyboard.press("Escape");
 
@@ -367,6 +370,10 @@ test.describe("snackpage picker — keymap and modes", () => {
       );
     });
     expect(selectedIdx).toBe(total - 1);
+    await expect(page.locator("#web-search-option-google")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
 
     // After G: the list must have scrolled down so the bottom row is visible.
     const scrollAfter = await page.evaluate(
@@ -407,7 +414,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     // Prime the list with multiple rows.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 1
+      () => document.querySelectorAll("#list li[data-id]").length > 1
     );
     await page.keyboard.press("Escape");
 
@@ -415,7 +422,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.keyboard.press("j");
     await page.keyboard.press("j");
     const beforeId = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
 
     // Type "g" — this is a prefix (for "gg"), so the buffer arms but no
@@ -430,7 +437,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     // re-arm but NOT trigger nav-top. Selection should not have changed.
     await page.keyboard.press("g");
     const afterId = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(afterId).toBe(beforeId);
   });
@@ -438,9 +445,11 @@ test.describe("snackpage picker — keymap and modes", () => {
   test("search filters by title", async ({ page }) => {
     await page.locator("#q").fill("github");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
+      () => document.querySelectorAll("#list li[data-id]").length > 0
     );
-    const titles = await page.locator("#list .title").allTextContents();
+    const titles = await page
+      .locator("#list li[data-id] .title")
+      .allTextContents();
     expect(titles.length).toBeGreaterThan(0);
     expect(titles.length).toBeLessThan(100);
     expect(
@@ -451,9 +460,11 @@ test.describe("snackpage picker — keymap and modes", () => {
   test("search filters by tag", async ({ page }) => {
     await page.locator("#q").fill("shopping");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
+      () => document.querySelectorAll("#list li[data-id]").length > 0
     );
-    const titles = await page.locator("#list .title").allTextContents();
+    const titles = await page
+      .locator("#list li[data-id] .title")
+      .allTextContents();
     expect(titles.length).toBeGreaterThan(0);
     // Demo data has Amazon, eBay, Etsy, Walmart, etc. tagged "shopping"
     expect(
@@ -463,20 +474,25 @@ test.describe("snackpage picker — keymap and modes", () => {
     ).toBeTruthy();
   });
 
-  test("search no-match returns empty list", async ({ page }) => {
+  test("search no-match returns only the selected web-search action", async ({
+    page,
+  }) => {
     await page.locator("#q").fill("qqqxyz");
-    // List should empty out. Wait briefly for the input handler.
-    await expect(page.locator("#list li")).toHaveCount(0);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(0);
+    await expect(page.locator("#web-search-option-google")).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   test("Enter on selected row hits /go/:id", async ({ page }) => {
     // Need rows to have something to open — type first.
     await page.locator("#q").fill("e");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
+      () => document.querySelectorAll("#list li[data-id]").length > 0
     );
     const id = await page
-      .locator('#list li[aria-selected="true"]')
+      .locator('#list li[data-id][aria-selected="true"]')
       .getAttribute("data-id");
     expect(id).toBeTruthy();
     const requestPromise = page.waitForRequest((req) =>
@@ -509,18 +525,18 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.locator("#q").focus();
     await page.locator("#q").fill(tag);
     await page.waitForFunction((t) => {
-      return [...document.querySelectorAll("#list li")].some((li) =>
+      return [...document.querySelectorAll("#list li[data-id]")].some((li) =>
         li.querySelector(".sub")?.textContent?.includes(t),
       );
     }, tag);
 
-    // Drop into normal mode, dd to delete; count should fall to 0 since only
-    // our bookmark matches the query.
+    // Drop into normal mode, then dd removes the only matching bookmark. The
+    // synthetic web-search action remains available for the query.
     await page.keyboard.press("Escape");
     await page.keyboard.press("d");
     await page.keyboard.press("d");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length === 0,
+      () => document.querySelectorAll("#list li[data-id]").length === 0,
     );
 
     // u → undo. POSTs the snapshot back; the new bookmark has the same tag
@@ -557,7 +573,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.locator("#q").focus();
     await page.locator("#q").fill(tag);
     await page.waitForFunction((t) => {
-      return [...document.querySelectorAll("#list li")].some((li) =>
+      return [...document.querySelectorAll("#list li[data-id]")].some((li) =>
         li.querySelector(".sub")?.textContent?.includes(t),
       );
     }, tag);
@@ -649,11 +665,11 @@ test.describe("snackpage picker — keymap and modes", () => {
       () => document.getElementById("count")?.textContent !== "",
     );
     await page.locator("#q").fill(tag);
-    await expect(page.locator("#list li")).toHaveCount(1);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(1);
     await page.keyboard.press("Escape");
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await expect(page.locator("#list li")).toHaveCount(0);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(0);
 
     await page.route("**/api/bookmarks", async (route) => {
       if (route.request().method() === "POST") {
@@ -677,7 +693,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     );
     await page.keyboard.press("u");
     await retry;
-    await expect(page.locator("#list li")).toHaveCount(1);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(1);
 
     const list = await (await request.get("/api/bookmarks")).json();
     const restored = list.bookmarks.find((bookmark) =>
@@ -708,7 +724,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.keyboard.press("Escape");
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await expect(page.locator("#list li")).toHaveCount(0);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(0);
 
     let posts = 0;
     await page.route("**/api/bookmarks", async (route) => {
@@ -723,7 +739,7 @@ test.describe("snackpage picker — keymap and modes", () => {
     });
     await page.keyboard.press("u");
     await page.keyboard.press("u");
-    await expect(page.locator("#list li")).toHaveCount(1);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(1);
     expect(posts).toBe(1);
 
     const body = await (await request.get("/api/bookmarks")).json();
@@ -757,28 +773,36 @@ test.describe("snackpage picker — keymap and modes", () => {
     await page.keyboard.press("Enter");
 
     await page.locator("#q").fill(tag);
-    await expect(page.locator("#list li")).toHaveCount(1);
-    const originalId = await page.locator("#list li").getAttribute("data-id");
+    await expect(page.locator("#list li[data-id]")).toHaveCount(1);
+    const originalId = await page
+      .locator("#list li[data-id]")
+      .getAttribute("data-id");
     await page.keyboard.press("Escape");
     await page.keyboard.press("e");
     await page.locator("#m-title").fill(editedTitle);
     await page.keyboard.press("Enter");
-    await expect(page.locator("#list .title")).toHaveText(editedTitle);
+    await expect(page.locator("#list li[data-id] .title")).toHaveText(
+      editedTitle,
+    );
 
     await page.keyboard.press("d");
     await page.keyboard.press("d");
-    await expect(page.locator("#list li")).toHaveCount(0);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(0);
 
     await page.keyboard.press("u");
-    await expect(page.locator("#list li")).toHaveCount(1);
-    const restoredId = await page.locator("#list li").getAttribute("data-id");
+    await expect(page.locator("#list li[data-id]")).toHaveCount(1);
+    const restoredId = await page
+      .locator("#list li[data-id]")
+      .getAttribute("data-id");
     expect(restoredId).not.toBe(originalId);
 
     await page.keyboard.press("u");
-    await expect(page.locator("#list .title")).toHaveText(originalTitle);
+    await expect(page.locator("#list li[data-id] .title")).toHaveText(
+      originalTitle,
+    );
 
     await page.keyboard.press("u");
-    await expect(page.locator("#list li")).toHaveCount(0);
+    await expect(page.locator("#list li[data-id]")).toHaveCount(0);
   });
 
   test("<Space>m in normal mode jumps to /manage", async ({ page }) => {

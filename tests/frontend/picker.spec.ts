@@ -35,9 +35,9 @@ test.describe("snackpage picker — load and render", () => {
   test("typing reveals matching rows", async ({ page }) => {
     await page.locator("#q").fill("github");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
+      () => document.querySelectorAll("#list li[data-id]").length > 0
     );
-    const count = await page.locator("#list li").count();
+    const count = await page.locator("#list li[data-id]").count();
     expect(count).toBeGreaterThan(0);
     expect(count).toBeLessThan(100);
   });
@@ -45,7 +45,7 @@ test.describe("snackpage picker — load and render", () => {
   test("backspacing to empty hides the list again", async ({ page }) => {
     await page.locator("#q").fill("github");
     await page.waitForFunction(
-      () => document.querySelectorAll("#list li").length > 0
+      () => document.querySelectorAll("#list li[data-id]").length > 0
     );
     await page.locator("#q").fill("");
     await page.waitForFunction(
